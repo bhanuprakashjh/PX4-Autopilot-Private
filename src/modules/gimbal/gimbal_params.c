@@ -146,6 +146,7 @@ PARAM_DEFINE_INT32(MNT_MAN_YAW, 0);
 * @value 0 Disable
 * @value 1 Stabilize all axis
 * @value 2 Stabilize yaw for absolute/lock mode.
+* @value 3 Stabilize pitch for absolute/lock mode.
 * @min 0
 * @max 2
 * @group Mount
