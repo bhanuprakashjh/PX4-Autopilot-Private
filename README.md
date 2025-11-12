@@ -10,6 +10,65 @@ This repository holds the [PX4](http://px4.io) flight control solution for drone
 
 PX4 is highly portable, OS-independent and supports Linux, NuttX and MacOS out of the box.
 
+---
+
+## Custom Board Support: ATSAMV71-XULT
+
+This repository includes support for the **Microchip ATSAMV71-XULT development board** with Click sensor boards for drone flight control applications.
+
+### Hardware Configuration
+- **MCU:** ATSAMV71Q21B (ARM Cortex-M7 @ 300MHz)
+- **Flash:** 2MB (40.97% used = 859KB firmware)
+- **RAM:** 384KB (5.60% used = 22KB)
+- **Sensors:** ICM20689 IMU, AK09916 magnetometer, DPS310 barometer (via MikroElektronika Click boards)
+
+### Build Status
+✅ **Firmware builds successfully** (commit: 7afa7db)
+- Binary size: 859,184 bytes
+- Build system: CMake + Ninja with NuttX RTOS
+- Target: `make microchip_samv71-xult-clickboards_default`
+
+### Features Implemented
+- GPIO interrupt support for sensor DRDY signals
+- ADC battery monitoring (voltage/current sensing)
+- I2C bus configuration (TWIHS0 for external sensors)
+- High-resolution timer (HRT) using TC0
+- USB CDC/ACM serial console
+- Linker script for SAMV71Q21B memory layout
+- Board identity and MCU version detection
+
+### Known Limitations
+⚠️ **Not Yet Implemented:**
+- PWM outputs (timer configuration empty - cannot control motors/servos)
+- SPI device configuration (waiting for hardware testing)
+- GPIO pin mappings are placeholders (need schematic verification)
+- USB VBUS detection stubbed
+
+⏳ **Hardware Testing Pending:**
+- Serial console verification
+- I2C bus detection
+- Sensor integration
+- Full system testing
+
+### Documentation
+For detailed porting notes, build instructions, and development roadmap, see:
+- [boards/microchip/samv71-xult-clickboards/PORTING_NOTES.md](boards/microchip/samv71-xult-clickboards/PORTING_NOTES.md)
+
+### Quick Start
+```bash
+# Build firmware
+make microchip_samv71-xult-clickboards_default
+
+# Flash via BOSSA bootloader (requires SAM-BA mode)
+cd build/microchip_samv71-xult-clickboards_default
+sudo bossac -e -w -v -b -R -p /dev/ttyACM0 microchip_samv71-xult-clickboards_default.bin
+
+# Connect serial console (57600 baud)
+minicom -D /dev/ttyACM0 -b 57600
+```
+
+---
+
 * Official Website: http://px4.io (License: BSD 3-clause, [LICENSE](https://github.com/PX4/PX4-Autopilot/blob/main/LICENSE))
 * [Supported airframes](https://docs.px4.io/main/en/airframes/airframe_reference.html) ([portfolio](https://px4.io/ecosystem/commercial-systems/)):
   * [Multicopters](https://docs.px4.io/main/en/frames_multicopter/)
