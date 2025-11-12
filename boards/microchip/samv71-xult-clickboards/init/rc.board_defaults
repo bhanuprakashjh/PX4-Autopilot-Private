@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# SAMV71-XULT board defaults
+#------------------------------------------------------------------------------
+
+# System parameters
+param set-default SYS_AUTOSTART 4001
+
+# Enable all sensors
+param set-default SENS_EN_INA226 0
+param set-default SENS_EN_INA228 0
+param set-default SENS_EN_INA238 0
+
+# Battery monitoring (if ADC available)
+# param set-default BAT1_V_DIV 11.0
+# param set-default BAT1_A_PER_V 18.0
+
+# EKF2 Parameters
+param set-default EKF2_IMU_CTRL 7
+param set-default EKF2_MAG_TYPE 1
+
+# Logger buffer
+set LOGGER_BUF 64

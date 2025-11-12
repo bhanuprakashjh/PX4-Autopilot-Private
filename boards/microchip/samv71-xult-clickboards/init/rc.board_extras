@@ -1,0 +1,6 @@
+#!/bin/sh
+#
+# SAMV71-XULT board extras
+#------------------------------------------------------------------------------
+
+# Additional board-specific initialization

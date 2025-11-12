@@ -1,0 +1,13 @@
+{
+    "board_id": 1371,
+    "magic": "SAMV71XU",
+    "description": "Firmware for the Microchip SAMV71-XULT with Click sensor boards",
+    "image": "",
+    "build_time": 0,
+    "summary": "SAMV71XULT",
+    "version": "0.1",
+    "image_size": 0,
+    "image_maxsize": 2031616,
+    "git_identity": "",
+    "board_revision": 0
+}
