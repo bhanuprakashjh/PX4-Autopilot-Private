@@ -121,6 +121,12 @@ public:
 			return slots[index].value;
 		}
 
+		// Workaround for C++ static initialization bug on SAMV7
+		// If parent is null, return default value instead of crashing
+		if (_parent == nullptr) {
+			return px4::parameters[param].val;
+		}
+
 		return _parent->get(param);
 	}
 

@@ -5,12 +5,13 @@
 
 # Start I2C sensors on bus 0 (TWIHS0)
 
-# ICM-20689 IMU on mikroBUS Socket 1 (I2C address 0x68)
-icm20689 -I -b 0 start
+# ICM-20689 IMU - NOTE: Requires SPI configuration (not yet implemented)
+# TODO: Configure SPI buses in spi.cpp before enabling this
+# icm20689 start -s -b 0
 
 # AK09916 Magnetometer on Arduino headers (I2C address 0x0C)
 # Note: Using AK09916 driver which is compatible with AK09915
-ak09916 -I -b 0 start
+ak09916 start -I -b 0
 
 # DPS310 Barometer on mikroBUS Socket 2 (I2C address 0x77)
-dps310 -I -b 0 start
+dps310 start -I -b 0
