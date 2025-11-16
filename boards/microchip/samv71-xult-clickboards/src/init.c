@@ -56,6 +56,7 @@
 #include <nuttx/board.h>
 #include <nuttx/mmcsd.h>
 #include <nuttx/mm/gran.h>
+#include <nuttx/i2c/i2c_master.h>
 #include <chip.h>
 #include <arch/board/board.h>
 #include "arm_internal.h"
@@ -146,6 +147,8 @@ sam_boardinitialize(void)
 
 	/* configure USB interfaces */
 	sam_usbinitialize();
+
+	/* I2C initialization moved to board_app_initialize to avoid early interrupt issues */
 }
 
 /****************************************************************************
@@ -174,6 +177,25 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 	syslog(LOG_ERR, "[boot] Calling px4_platform_init...\n");
 	px4_platform_init();
 	syslog(LOG_ERR, "[boot] px4_platform_init completed\n");
+
+	/* Initialize I2C buses - must be after px4_platform_init */
+#ifdef CONFIG_SAMV7_TWIHS0
+	syslog(LOG_ERR, "[boot] Initializing I2C bus 0 (TWIHS0)...\n");
+	struct i2c_master_s *i2c0 = sam_i2cbus_initialize(0);
+	if (i2c0 == NULL) {
+		syslog(LOG_ERR, "[boot] ERROR: Failed to initialize I2C bus 0\n");
+	} else {
+		syslog(LOG_ERR, "[boot] I2C bus 0 initialized successfully, registering device...\n");
+
+		/* Register I2C bus with NuttX device tree */
+		int ret = i2c_register(i2c0, 0);
+		if (ret < 0) {
+			syslog(LOG_ERR, "[boot] ERROR: Failed to register I2C bus 0: %d\n", ret);
+		} else {
+			syslog(LOG_ERR, "[boot] I2C bus 0 registered as /dev/i2c0\n");
+		}
+	}
+#endif
 
 	/* configure the DMA allocator */
 	syslog(LOG_ERR, "[boot] Initializing DMA allocator...\n");
