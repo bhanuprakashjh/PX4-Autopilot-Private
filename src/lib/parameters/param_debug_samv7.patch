@@ -1,0 +1,21 @@
+--- a/src/lib/parameters/parameters.cpp
++++ b/src/lib/parameters/parameters.cpp
+@@ -145,6 +145,17 @@ param_init()
+ #if defined(CONFIG_PARAM_REMOTE)
+ 	param_remote_init();
+ #endif // CONFIG_PARAM_REMOTE
++
++	// SAMV7 diagnostic: Check if user_config storage was properly allocated
++	PX4_INFO("=== SAMV7 Parameter Storage Diagnostic ===");
++	PX4_INFO("user_config size: %d", user_config.size());
++	PX4_INFO("user_config byteSize: %d", user_config.byteSize());
++	PX4_INFO("runtime_defaults size: %d", runtime_defaults.size());
++	PX4_INFO("runtime_defaults byteSize: %d", runtime_defaults.byteSize());
++
++	if (user_config.byteSize() == 0) {
++		PX4_ERR("CRITICAL: user_config storage allocation FAILED during static init!");
++		PX4_ERR("This is the SAMV7 C++ static initialization bug - params cannot be stored!");
++	}
+
+ #if not defined(CONFIG_PARAM_REMOTE)
+ 	autosave_instance = new ParamAutosave();

@@ -31,60 +31,81 @@
  *
  ****************************************************************************/
 
+#include <board_config.h>
+#include <px4_arch/micro_hal.h>
 #include <px4_arch/spi_hw_description.h>
+#include <px4_platform_common/spi.h>
 #include <drivers/drv_sensor.h>
 #include <nuttx/spi/spi.h>
 
-/* SPI bus configuration for SAMV71-XULT with Click sensor boards
- *
- * NOTE: Pin assignments are placeholders. The actual SPI pin assignments depend on:
- * 1. Which mikroBUS socket the sensors are plugged into
- * 2. The SAMV71-XULT schematic showing SPI routing to mikroBUS sockets
- *
- * This needs to be updated once the hardware is available and schematics are reviewed.
- *
- * SAMV71-XULT has:
- * - SPI0: Typically on PA25-PA28 (MISO, MOSI, SPCK, NPCS0-3)
- * - SPI1: Typically on PC26-PC29 (MISO, MOSI, SPCK, NPCS0-3)
- *
- * For Click boards sensor connections, we'll likely use SPI0.
- */
+static constexpr px4_spi_bus_device_t make_spidev(uint32_t drvtype, uint32_t cs_gpio,
+		spi_drdy_gpio_t drdy_gpio = 0)
+{
+	return px4_spi_bus_device_t {
+		.cs_gpio = cs_gpio,
+		.drdy_gpio = drdy_gpio,
+		.devid = PX4_SPIDEV_ID(PX4_SPI_DEVICE_ID, drvtype),
+		.devtype_driver = static_cast<uint16_t>(drvtype),
+	};
+}
 
-/* Temporarily empty SPI configuration - sensors not yet wired */
 constexpr px4_spi_bus_t px4_spi_buses[SPI_BUS_MAX_BUS_ITEMS] = {
+	{
+		.devices = {
+			make_spidev(DRV_IMU_DEVTYPE_ICM20689, GPIO_SPI0_CS_ICM20689, GPIO_SPI0_DRDY_ICM20689),
+		},
+		.power_enable_gpio = 0,
+		.bus = static_cast<int8_t>(SPI::Bus::SPI0),
+		.is_external = false,
+		.requires_locking = false,
+	},
 };
 
 /* SPI chip select and status functions required by NuttX SAMV7 */
 extern "C" {
 
+static void sam_spixselect(SPI::Bus bus_id, uint32_t devid, bool selected)
+{
+	for (const auto &bus : px4_spi_buses) {
+		if (bus.bus != static_cast<int8_t>(bus_id)) {
+			continue;
+		}
+
+		for (const auto &device : bus.devices) {
+			if (device.cs_gpio == 0) {
+				continue;
+			}
+
+			const bool device_selected = (device.devid == devid) ? selected : false;
+			px4_arch_gpiowrite(device.cs_gpio, !device_selected);
+		}
+	}
+}
+
 void sam_spi0select(uint32_t devid, bool selected)
 {
-	/* No SPI devices configured yet - stub */
-	(void)devid;
-	(void)selected;
+	sam_spixselect(SPI::Bus::SPI0, devid, selected);
 }
 
 uint8_t sam_spi0status(struct spi_dev_s *dev, uint32_t devid)
 {
-	/* No SPI devices configured yet - stub */
 	(void)dev;
 	(void)devid;
-	return 0;
+	return SPI_STATUS_PRESENT;
 }
 
 void sam_spi1select(uint32_t devid, bool selected)
 {
-	/* No SPI devices configured yet - stub */
+	/* SPI1 unconnected */
 	(void)devid;
 	(void)selected;
 }
 
 uint8_t sam_spi1status(struct spi_dev_s *dev, uint32_t devid)
 {
-	/* No SPI devices configured yet - stub */
 	(void)dev;
 	(void)devid;
-	return 0;
+	return SPI_STATUS_PRESENT;
 }
 
 } // extern "C"

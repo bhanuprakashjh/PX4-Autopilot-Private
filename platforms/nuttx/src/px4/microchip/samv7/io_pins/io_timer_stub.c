@@ -56,6 +56,3 @@ uint32_t io_timer_channel_get_as_pwm_input(unsigned channel)
 	(void)channel;
 	return 0;
 }
-
-/* Performance monitoring latency counters */
-uint32_t latency_counters[8];  /* Global latency counter array */

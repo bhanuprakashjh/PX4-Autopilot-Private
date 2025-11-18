@@ -47,6 +47,9 @@ set PARAM_DEFAULTS_VER 1
 #
 ver all
 
+# TEMPORARILY DISABLED: Stop all mavlink instances EARLY for SD card debugging (console buffer bug causes hangs on warnings)
+mavlink stop-all >/dev/null 2>&1
+
 #
 # Try to mount the microSD card.
 #
@@ -271,16 +274,17 @@ else
 	# Waypoint storage.
 	# REBOOTWORK this needs to start in parallel.
 	#
-	if param compare -s SYS_DM_BACKEND 1
-	then
-		dataman start -r
-	else
-		if param compare SYS_DM_BACKEND 0
-		then
-			# dataman start default
-			dataman start
-		fi
-	fi
+	# TEMPORARILY DISABLED - dataman hangs when no storage available
+	# if param compare -s SYS_DM_BACKEND 1
+	# then
+	# 	dataman start -r
+	# else
+	# 	if param compare SYS_DM_BACKEND 0
+	# 	then
+	# 		# dataman start default (with optional board-specific path)
+	# 		dataman start $DATAMAN_OPT
+	# 	fi
+	# fi
 
 	#
 	# Start the socket communication send_event handler.
@@ -507,19 +511,23 @@ else
 	#
 	. ${R}etc/init.d/rc.serial
 
+	# TEMPORARILY DISABLED: Stop mavlink instances started by rc.serial (console buffer bug causes hangs on warnings)
+	mavlink stop-all >/dev/null 2>&1
+
 	# Must be started after the serial config is read
 	rc_input start $RC_INPUT_ARGS
 
 	# Manages USB interface
-	if param greater -s SYS_USB_AUTO -1
-	then
-		if ! cdcacm_autostart start
-		then
-			sercon
-			echo "Starting MAVLink on /dev/ttyACM0"
-			mavlink start -d /dev/ttyACM0
-		fi
-	fi
+	# TEMPORARILY DISABLED - mavlink mission handler calls dataman_client which hangs
+	# if param greater -s SYS_USB_AUTO -1
+	# then
+	# 	if ! cdcacm_autostart start
+	# 	then
+	# 		sercon
+	# 		echo "Starting MAVLink on /dev/ttyACM0"
+	# 		mavlink start -d /dev/ttyACM0
+	# 	fi
+	# fi
 
 	#
 	# Play the startup tune (if not disabled or there is an error)
@@ -532,8 +540,8 @@ else
 
 	#
 	# Start the navigator.
-	#
-	navigator start
+	# TEMPORARILY DISABLED - navigator requires dataman which isn't available
+	# navigator start
 
 	#
 	# Start a thermal calibration if required.
@@ -575,7 +583,8 @@ else
 		px4flow start -X &
 	fi
 
-	payload_deliverer start
+	# TEMPORARILY DISABLED - testing dataman_client trigger
+	# payload_deliverer start
 
 	if param compare -s ICE_EN 1
 	then
@@ -676,5 +685,5 @@ unset VEHICLE_TYPE
 
 #
 # Boot is complete, inform MAVLink app(s) that the system is now fully up and running.
-#
-mavlink boot_complete
+# TEMPORARILY DISABLED - no mavlink instances running during SD debug
+# mavlink boot_complete

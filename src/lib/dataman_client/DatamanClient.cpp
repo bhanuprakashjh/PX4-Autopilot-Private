@@ -45,7 +45,8 @@ DatamanClient::DatamanClient()
 	_dataman_response_sub = orb_subscribe(ORB_ID(dataman_response));
 
 	if (_dataman_response_sub < 0) {
-		PX4_ERR("Failed to subscribe (%i)", errno);
+		// TEMPORARY PATCH: Silently fail if dataman service not available (for SD card debugging)
+		_available = false;
 
 	} else {
 		// make sure we don't get any stale response by doing an orb_copy
@@ -65,11 +66,12 @@ DatamanClient::DatamanClient()
 		bool success = syncHandler(request, response, timestamp, 1000_ms);
 
 		if (success && (response.client_id > CLIENT_ID_NOT_SET)) {
-
 			_client_id = response.client_id;
+			_available = true;  // TEMPORARY PATCH: Service is available
 
 		} else {
-			PX4_ERR("Failed to get client ID!");
+			// TEMPORARY PATCH: Silently fail if dataman service not available (for SD card debugging)
+			_available = false;
 		}
 	}
 }
@@ -98,7 +100,8 @@ bool DatamanClient::syncHandler(const dataman_request_s &request, dataman_respon
 		ret = px4_poll(&_fds, 1, timeout_ms);
 
 		if (ret < 0) {
-			PX4_ERR("px4_poll returned error: %" PRIu32, ret);
+			// TEMPORARY PATCH: Don't print poll errors (causes system hang when dataman unavailable)
+			// PX4_ERR("px4_poll returned error: %" PRIu32, ret);
 			break;
 
 		} else if (ret == 0) {
@@ -139,15 +142,17 @@ bool DatamanClient::syncHandler(const dataman_request_s &request, dataman_respon
 
 	perf_end(_sync_perf);
 
-	if (!response_received && ret >= 0) {
-		PX4_ERR("timeout after %" PRIu32 " ms!", static_cast<uint32_t>(timeout / 1000));
-	}
+	// TEMPORARY PATCH: Don't print timeout errors (causes system hang when dataman unavailable)
+	// if (!response_received && ret >= 0) {
+	// 	PX4_ERR("timeout after %" PRIu32 " ms!", static_cast<uint32_t>(timeout / 1000));
+	// }
 
 	return response_received;
 }
 
 bool DatamanClient::readSync(dm_item_t item, uint32_t index, uint8_t *buffer, uint32_t length, hrt_abstime timeout)
 {
+	if (!_available) { return false; }  // TEMPORARY PATCH: Silently fail if service unavailable
 	if (length > g_per_item_size[item]) {
 		PX4_ERR("Length  %" PRIu32 " can't fit in data size for item  %" PRIi8, length, static_cast<uint8_t>(item));
 		return false;
@@ -184,6 +189,7 @@ bool DatamanClient::readSync(dm_item_t item, uint32_t index, uint8_t *buffer, ui
 
 bool DatamanClient::writeSync(dm_item_t item, uint32_t index, uint8_t *buffer, uint32_t length, hrt_abstime timeout)
 {
+	if (!_available) { return false; }  // TEMPORARY PATCH: Silently fail if service unavailable
 	if (length > g_per_item_size[item]) {
 		PX4_ERR("Length  %" PRIu32 " can't fit in data size for item  %" PRIi8, length, static_cast<uint8_t>(item));
 		return false;
@@ -219,6 +225,7 @@ bool DatamanClient::writeSync(dm_item_t item, uint32_t index, uint8_t *buffer, u
 
 bool DatamanClient::clearSync(dm_item_t item, hrt_abstime timeout)
 {
+	if (!_available) { return false; }  // TEMPORARY PATCH: Silently fail if service unavailable
 	hrt_abstime timestamp = hrt_absolute_time();
 
 	dataman_request_s request;
@@ -245,6 +252,7 @@ bool DatamanClient::clearSync(dm_item_t item, hrt_abstime timeout)
 
 bool DatamanClient::readAsync(dm_item_t item, uint32_t index, uint8_t *buffer, uint32_t length)
 {
+	if (!_available) { return false; }  // TEMPORARY PATCH: Silently fail if service unavailable
 	if (length > g_per_item_size[item]) {
 		PX4_ERR("Length  %" PRIu32 " can't fit in data size for item  %" PRIi8, length, static_cast<uint8_t>(item));
 		return false;
@@ -283,6 +291,7 @@ bool DatamanClient::readAsync(dm_item_t item, uint32_t index, uint8_t *buffer, u
 
 bool DatamanClient::writeAsync(dm_item_t item, uint32_t index, uint8_t *buffer, uint32_t length)
 {
+	if (!_available) { return false; }  // TEMPORARY PATCH: Silently fail if service unavailable
 	if (length > g_per_item_size[item]) {
 		PX4_ERR("Length  %" PRIu32 " can't fit in data size for item  %" PRIi8, length, static_cast<uint8_t>(item));
 		return false;
@@ -323,6 +332,7 @@ bool DatamanClient::writeAsync(dm_item_t item, uint32_t index, uint8_t *buffer, 
 
 bool DatamanClient::clearAsync(dm_item_t item)
 {
+	if (!_available) { return false; }  // TEMPORARY PATCH: Silently fail if service unavailable
 	bool success = false;
 
 	if (_state == State::Idle) {

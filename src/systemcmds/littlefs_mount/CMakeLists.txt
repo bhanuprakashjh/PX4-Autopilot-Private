@@ -1,6 +1,6 @@
 ############################################################################
 #
-#   Copyright (c) 2024 PX4 Development Team. All rights reserved.
+#   Copyright (c) 2025 PX4 Development Team. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -31,22 +31,11 @@
 #
 ############################################################################
 
-add_library(drivers_board
-	i2c.cpp
-	init.c
-	led.c
-	sam_gpiosetevent.c
-	sam_hsmci.c
-	spi.cpp
-	timer_config.cpp
-	usb.c
-)
-
-target_link_libraries(drivers_board
-	PRIVATE
-		arch_io_pins
-		drivers__led # drv_led_start
-		nuttx_arch
-		nuttx_drivers
-		px4_layer
+px4_add_module(
+	MODULE systemcmds__littlefs_mount
+	MAIN littlefs_mount
+	COMPILE_FLAGS
+	SRCS
+		littlefs_mount.c
+	DEPENDS
 )

@@ -1,0 +1,15 @@
+#!/bin/sh
+#
+# SAMV71-XULT board-specific serial port configuration override
+#
+
+# TEMPORARILY DISABLED: Override serial port detection to prevent any serial devices from being configured
+# This file is sourced by rc.serial for EVERY serial port (GPS, RC, MAV_0, MAV_1, MAV_2, etc.)
+# By always setting SERIAL_DEV=none, we prevent rc.serial from starting ANY serial-based modules
+# including mavlink, which was dumping binary garbage to console during SD card debugging
+#
+# The default rc.serial_port (auto-generated) reads parameter $PRT and sets SERIAL_DEV based on it
+# This override ignores the parameter and always returns "none"
+
+set SERIAL_DEV none
+set BAUD_PARAM none

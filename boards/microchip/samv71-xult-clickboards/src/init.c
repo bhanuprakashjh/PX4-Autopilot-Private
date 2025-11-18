@@ -55,11 +55,17 @@
 #include <nuttx/config.h>
 #include <nuttx/board.h>
 #include <nuttx/mmcsd.h>
+#include <nuttx/sdio.h>
 #include <nuttx/mm/gran.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <chip.h>
 #include <arch/board/board.h>
 #include "arm_internal.h"
+
+#ifdef CONFIG_SAMV7_HSMCI0
+#  include "sam_hsmci.h"
+#  include "board_hsmci.h"
+#endif
 
 #include <px4_arch/io_timer.h>
 #include <drivers/drv_hrt.h>
@@ -68,6 +74,8 @@
 #include <px4_platform_common/init.h>
 #include <px4_platform/gpio.h>
 #include <px4_platform/board_dma_alloc.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
 
 # if defined(FLASH_BASED_PARAMS)
 #  include <parameters/flashparams/flashfs.h>
@@ -82,6 +90,49 @@ extern void led_init(void);
 extern void led_on(int led);
 extern void led_off(int led);
 __END_DECLS
+
+#ifdef CONFIG_SAMV7_HSMCI0
+/****************************************************************************
+ * Name: samv71_sdcard_initialize
+ *
+ * Description:
+ *   Bring up the SAMV71 HSMCI (slot 0) and mount /fs/microsd.
+ *
+ ****************************************************************************/
+static int samv71_sdcard_initialize(void)
+{
+	int ret;
+
+	syslog(LOG_INFO, "[boot] Initializing SD card (HSMCI0)...\n");
+
+	/* Initialize HSMCI with board-specific glue */
+	ret = sam_hsmci_initialize(HSMCI0_SLOTNO, HSMCI0_MINOR, GPIO_HSMCI0_CD, IRQ_HSMCI0_CD);
+
+	if (ret < 0) {
+		syslog(LOG_ERR, "[boot] SD card initialization failed: %d\n", ret);
+		return ret;
+	}
+
+	syslog(LOG_INFO, "[boot] sam_hsmci_initialize returned OK\n");
+
+	/* Wait for card initialization to complete.
+	 * Card initialization happens asynchronously through callbacks after
+	 * sam_hsmci_initialize returns. We need to wait for this to complete
+	 * before rcS tries to mount the filesystem.
+	 * 1000ms has been tested and verified to work reliably.
+	 */
+	syslog(LOG_INFO, "[boot] Waiting 1000ms for async card initialization...\n");
+	up_mdelay(1000);
+
+	syslog(LOG_INFO, "[boot] SD card initialized\n");
+
+	/* Create mount point directory for rcS */
+	(void)mkdir("/fs", 0777);
+	(void)mkdir("/fs/microsd", 0777);
+
+	return OK;
+}
+#endif /* CONFIG_SAMV7_HSMCI0 */
 
 /************************************************************************************
  * Name: board_peripheral_reset
@@ -128,18 +179,7 @@ sam_boardinitialize(void)
 
 	/* configure LEDs */
 	board_autoled_initialize();
-
-	/* Initialize and blink LED very early to show boot */
 	led_init();
-	for (int i = 0; i < 5; i++) {
-		led_on(0);
-		for (volatile int j = 0; j < 1000000; j++); // Simple delay
-		led_off(0);
-		for (volatile int j = 0; j < 1000000; j++);
-	}
-
-	/* Test syslog very early */
-	syslog(LOG_ERR, "\n*** SAMV71 SAM_BOARDINITIALIZE START ***\n");
 
 	/* configure pins */
 	const uint32_t gpio[] = PX4_GPIO_INIT_LIST;
@@ -163,118 +203,50 @@ sam_boardinitialize(void)
 
 __EXPORT int board_app_initialize(uintptr_t arg)
 {
-	/* Blink LED 10 times FIRST to show we reached here */
-	for (int i = 0; i < 10; i++) {
-		led_on(0);
-		up_mdelay(100);
-		led_off(0);
-		up_mdelay(100);
-	}
+	syslog(LOG_INFO, "[boot] SAMV71 board initialization starting\n");
 
-	/* Test syslog early - before px4_platform_init */
-	syslog(LOG_ERR, "\n\n*** SAMV71 BOARD_APP_INITIALIZE START ***\n");
-
-	syslog(LOG_ERR, "[boot] Calling px4_platform_init...\n");
 	px4_platform_init();
-	syslog(LOG_ERR, "[boot] px4_platform_init completed\n");
+
+#ifdef CONFIG_SAMV7_HSMCI0
+	if (samv71_sdcard_initialize() < 0) {
+		syslog(LOG_ERR, "[boot] SD initialization failed (continuing)\n");
+	}
+#endif
 
 	/* Initialize I2C buses - must be after px4_platform_init */
 #ifdef CONFIG_SAMV7_TWIHS0
-	syslog(LOG_ERR, "[boot] Initializing I2C bus 0 (TWIHS0)...\n");
 	struct i2c_master_s *i2c0 = sam_i2cbus_initialize(0);
 	if (i2c0 == NULL) {
 		syslog(LOG_ERR, "[boot] ERROR: Failed to initialize I2C bus 0\n");
 	} else {
-		syslog(LOG_ERR, "[boot] I2C bus 0 initialized successfully, registering device...\n");
-
-		/* Register I2C bus with NuttX device tree */
 		int ret = i2c_register(i2c0, 0);
 		if (ret < 0) {
 			syslog(LOG_ERR, "[boot] ERROR: Failed to register I2C bus 0: %d\n", ret);
 		} else {
-			syslog(LOG_ERR, "[boot] I2C bus 0 registered as /dev/i2c0\n");
+			syslog(LOG_INFO, "[boot] I2C bus 0 ready (/dev/i2c0)\n");
 		}
 	}
 #endif
 
 	/* configure the DMA allocator */
-	syslog(LOG_ERR, "[boot] Initializing DMA allocator...\n");
 	if (board_dma_alloc_init() < 0) {
 		syslog(LOG_ERR, "[boot] DMA alloc FAILED\n");
-	} else {
-		syslog(LOG_ERR, "[boot] DMA alloc OK\n");
 	}
 
-	syslog(LOG_ERR, "[boot] Starting LED driver...\n");
 	drv_led_start();
 
 	led_off(LED_RED);
 	led_on(LED_GREEN); // Indicate Power
 	led_off(LED_BLUE);
 
-	syslog(LOG_ERR, "[boot] Initializing hardfault handler...\n");
 	if (board_hardfault_init(2, true) != 0) {
 		led_on(LED_RED);
 		syslog(LOG_ERR, "[boot] Hardfault init FAILED\n");
-	} else {
-		syslog(LOG_ERR, "[boot] Hardfault init OK\n");
 	}
 
-#if defined(FLASH_BASED_PARAMS)
-	static sector_descriptor_t params_sector_map[] = {
-		{1, 128 * 1024, 0x00420000},
-		{2, 128 * 1024, 0x00440000},
-		{0, 0, 0},
-	};
+	syslog(LOG_INFO, "[boot] Parameters will be stored on /fs/microsd/params\n");
 
-	/* Initialize the flashfs layer to use heap allocated memory */
-	syslog(LOG_ERR, "[boot] Initializing flash params...\n");
-	int result = parameter_flashfs_init(params_sector_map, NULL, 0);
-
-	if (result != OK) {
-		syslog(LOG_ERR, "[boot] FAILED to init params in FLASH %d\n", result);
-		led_on(LED_AMBER);
-	} else {
-		syslog(LOG_ERR, "[boot] Flash params OK\n");
-	}
-#endif
-
-	syslog(LOG_ERR, "[boot] board_app_initialize complete, returning OK\n");
-
-	/* Test: blink LED after init completes */
-	for (int i = 0; i < 3; i++) {
-		syslog(LOG_ERR, "[boot] Post-init LED blink %d\n", i);
-		led_on(0);
-		up_mdelay(200);
-		led_off(0);
-		up_mdelay(200);
-	}
-
-	syslog(LOG_ERR, "[boot] About to return OK from board_app_initialize\n");
-
-	/* Restore stdout to serial console for NSH
-	 * px4_platform_init redirected it to console buffer, but NSH needs it on serial
-	 */
-	syslog(LOG_ERR, "[boot] Restoring stdout to serial console\n");
-	int fd_console = open("/dev/console", O_WRONLY);
-	if (fd_console >= 0) {
-		dup2(fd_console, 1);  // Redirect stdout back to serial console
-		close(fd_console);
-		syslog(LOG_ERR, "[boot] stdout restored to /dev/console\n");
-	} else {
-		syslog(LOG_ERR, "[boot] Failed to open /dev/console: %d\n", errno);
-	}
-
-	/* Test console output directly */
-	printf("\n\n");
-	printf("===========================================\n");
-	printf("SAMV71 Board Initialization Complete\n");
-	printf("===========================================\n");
-	printf("Serial console is working!\n");
-	printf("Returning from board_app_initialize...\n");
-	printf("NSH should start next.\n");
-	printf("\n");
-	fflush(stdout);
+	syslog(LOG_INFO, "[boot] Board initialization complete\n");
 
 	return OK;
 }

@@ -1,23 +1,20 @@
 #!/bin/sh
 #
 # SAMV71-XULT board defaults
-#------------------------------------------------------------------------------
 
-# System parameters
-param set-default SYS_AUTOSTART 4001
+# TEMPORARILY DISABLED: Disable all MAVLink instances for SD card debugging (console buffer bug causes hangs)
+param set-default MAV_0_CONFIG 0
+param set-default MAV_1_CONFIG 0
+param set-default MAV_2_CONFIG 0
 
-# Enable all sensors
-param set-default SENS_EN_INA226 0
-param set-default SENS_EN_INA228 0
-param set-default SENS_EN_INA238 0
+# TEMPORARILY DISABLED - filesystem issues causing system hang
+# Mount LittleFS, format on first boot
+# littlefs_mount -d /dev/mtdblock0 -m /fs/mtd_params || littlefs_mount -d /dev/mtdblock0 -m /fs/mtd_params -f
 
-# Battery monitoring (if ADC available)
-# param set-default BAT1_V_DIV 11.0
-# param set-default BAT1_A_PER_V 18.0
+# Override dataman storage path to use internal flash instead of SD
+# TEMPORARILY DISABLED - causes dataman to hang when filesystem not available
+# set DATAMAN_OPT "-f /fs/mtd_params/dataman"
 
-# EKF2 Parameters
-param set-default EKF2_IMU_CTRL 7
-param set-default EKF2_MAG_TYPE 1
-
-# Logger buffer
-set LOGGER_BUF 64
+# Default airframe
+# TEMPORARILY DISABLED - testing if this triggers dataman
+# param set-default SYS_AUTOSTART 60100

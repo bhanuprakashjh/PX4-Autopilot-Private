@@ -74,6 +74,14 @@ static uint8_t g_dma_heap[BOARD_DMA_ALLOC_POOL_SIZE] __attribute__((aligned(64))
 static perf_counter_t g_dma_perf;
 static uint16_t dma_heap_inuse;
 static uint16_t dma_heap_peak_use;
+static uint32_t dma_guard;
+
+#define DMA_GUARD_MAGIC 0x444d4130u
+
+static inline bool board_dma_ready(void)
+{
+	return dma_allocator != NULL && dma_guard == DMA_GUARD_MAGIC;
+}
 
 /****************************************************************************
  * Public Functions
@@ -81,6 +89,10 @@ static uint16_t dma_heap_peak_use;
 __EXPORT int
 board_dma_alloc_init(void)
 {
+	if (board_dma_ready()) {
+		return OK;
+	}
+
 	dma_allocator = gran_initialize(g_dma_heap,
 					sizeof(g_dma_heap),
 					7,  /* 128B granule - must be > alignment (XXX bug?) */
@@ -93,6 +105,7 @@ board_dma_alloc_init(void)
 		dma_heap_inuse = 0;
 		dma_heap_peak_use = 0;
 		g_dma_perf = perf_alloc(PC_COUNT, "dma_alloc");
+		dma_guard = DMA_GUARD_MAGIC;
 	}
 
 	return OK;
@@ -111,6 +124,12 @@ board_get_dma_usage(uint16_t *dma_total, uint16_t *dma_used, uint16_t *dma_peak_
 __EXPORT void *
 board_dma_alloc(size_t size)
 {
+	if (!board_dma_ready()) {
+		if (board_dma_alloc_init() < 0) {
+			return NULL;
+		}
+	}
+
 	void *rv = NULL;
 	perf_count(g_dma_perf);
 	rv = gran_alloc(dma_allocator, size);
@@ -129,6 +148,10 @@ board_dma_alloc(size_t size)
 __EXPORT void
 board_dma_free(FAR void *memory, size_t size)
 {
+	if (!board_dma_ready()) {
+		return;
+	}
+
 	gran_free(dma_allocator, memory, size);
 	dma_heap_inuse -= size;
 }

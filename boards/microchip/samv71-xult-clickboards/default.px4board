@@ -1,5 +1,8 @@
 CONFIG_BOARD_TOOLCHAIN="arm-none-eabi"
 CONFIG_BOARD_ARCHITECTURE="cortex-m7"
+CONFIG_BOARD_ROOT_PATH="/fs/microsd"
+CONFIG_BOARD_PARAM_FILE="/fs/microsd/params"
+CONFIG_BOARD_PARAM_BACKUP_FILE="/fs/microsd/params.bak"
 CONFIG_BOARD_CONSTRAINED_FLASH=y
 CONFIG_BOARD_NO_HELP=y
 CONFIG_BOARD_EXTERNAL_METADATA=y
@@ -12,7 +15,7 @@ CONFIG_BOARD_SERIAL_RC="/dev/ttyS4"
 # CONFIG_DRIVERS_ADC_BOARD_ADC is not set
 
 # USB CDC/ACM
-CONFIG_DRIVERS_CDCACM_AUTOSTART=y
+# CONFIG_DRIVERS_CDCACM_AUTOSTART is not set  # TEMPORARILY DISABLED - auto-starts mavlink which calls dataman_client
 
 # ESC/Motor Outputs - Disabled (requires timer/DShot implementation)
 # CONFIG_DRIVERS_DSHOT is not set
@@ -65,6 +68,8 @@ CONFIG_MODULES_SENSORS=y
 
 # System Commands
 CONFIG_SYSTEMCMDS_BSONDUMP=y
+CONFIG_SYSTEMCMDS_LITTLEFS_MOUNT=y
+CONFIG_SYSTEMCMDS_MFT=y
 # CONFIG_SYSTEMCMDS_DMESG is not set  # Hangs due to console buffer bug - not HRT related
 # CONFIG_SYSTEMCMDS_HARDFAULT_LOG is not set  # Needs dump_s type - not implemented for SAMV7 yet
 CONFIG_SYSTEMCMDS_PARAM=y

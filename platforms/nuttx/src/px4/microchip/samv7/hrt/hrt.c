@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2024 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2016-2020 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,12 +31,6 @@
  *
  ****************************************************************************/
 
-/**
- * @file hrt.c
- *
- * High-resolution timer for SAMV7 using TC0 (Timer/Counter 0)
- */
-
 #include <px4_platform_common/px4_config.h>
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
@@ -50,6 +44,7 @@
 #include <queue.h>
 #include <errno.h>
 #include <string.h>
+
 #include <syslog.h>
 
 #include <board_config.h>
@@ -59,6 +54,7 @@
 #include "hardware/sam_pmc.h"
 #include "hardware/sam_tc.h"
 
+
 #ifdef CONFIG_DEBUG_HRT
 #  define hrtinfo _info
 #else
@@ -66,172 +62,412 @@
 #endif
 
 #ifdef HRT_TIMER
-
-/* HRT configuration for SAMV7 TC0 */
 #if HRT_TIMER == 0
-# define HRT_TIMER_BASE		SAM_TC012_BASE
-# define HRT_TIMER_CHANNEL	0
-# define HRT_TIMER_VECTOR	SAM_IRQ_TC0
-# define HRT_TIMER_CLOCK	BOARD_MCK_FREQUENCY
-# define HRT_TIMER_PCER	(1 << SAM_PID_TC0)
+#  define HRT_TIMER_BASE      SAM_TC012_BASE
+#  define HRT_TIMER_VECTOR    SAM_IRQ_TC0
+#  define HRT_TIMER_CLOCK     BOARD_MCK_FREQUENCY
+#  define HRT_TIMER_PCER      (1 << SAM_PID_TC0)
 #else
-# error HRT_TIMER must be 0 for SAMV7 (TC0 Channel 0)
+#  error HRT_TIMER must be 0 for SAMV71 TC0
 #endif
 
-/* Minimum/maximum deadlines */
+#define HRT_TIMER_DIVISOR     32
+#define HRT_TIMER_FREQ        (HRT_TIMER_CLOCK / HRT_TIMER_DIVISOR)
+
+/**
+* Minimum/maximum deadlines.
+*
+* The high-resolution timer need only guarantee that it not wrap more than
+* once in the 50ms period for absolute time to be consistently maintained.
+*/
 #define HRT_INTERVAL_MIN	50
 #define HRT_INTERVAL_MAX	50000
 
-/* Actual timer frequency - MCK/32 prescaler (TC_CMR_TCCLKS_MCK32) */
-#define HRT_ACTUAL_FREQ		(HRT_TIMER_CLOCK / 32)
+/*
+* Period of the free-running counter, in timer ticks.
+*/
+#define HRT_COUNTER_PERIOD	UINT32_MAX
+#define HRT_COUNTER_PERIOD_TICKS (UINT64_C(1) << 32)
 
-/* Timer register addresses for TC0 Channel 0 */
-#define rCCR	(HRT_TIMER_BASE + SAM_TC_CCR_OFFSET)
-#define rCMR	(HRT_TIMER_BASE + SAM_TC_CMR_OFFSET)
-#define rCV	(HRT_TIMER_BASE + SAM_TC_CV_OFFSET)
-#define rRA	(HRT_TIMER_BASE + SAM_TC_RA_OFFSET)
-#define rRC	(HRT_TIMER_BASE + SAM_TC_RC_OFFSET)
-#define rSR	(HRT_TIMER_BASE + SAM_TC_SR_OFFSET)
-#define rIER	(HRT_TIMER_BASE + SAM_TC_IER_OFFSET)
-#define rIDR	(HRT_TIMER_BASE + SAM_TC_IDR_OFFSET)
-#define rIMR	(HRT_TIMER_BASE + SAM_TC_IMR_OFFSET)
-
-/* TC Channel Control Register bits */
-#define TC_CCR_CLKEN		(1 << 0)
-#define TC_CCR_CLKDIS		(1 << 1)
-#define TC_CCR_SWTRG		(1 << 2)
-
-/* TC register definitions - use NuttX hardware definitions */
-/* NuttX provides these in hardware/sam_tc.h */
-
-/* Forward declarations */
-static int hrt_tim_isr(int irq, void *context, void *arg);
-
-/* Callout list */
-static struct sq_queue_s callout_queue;
-
-/* Latency histogram */
-#define LATENCY_BUCKET_COUNT 8
-__EXPORT const uint16_t latency_buckets[LATENCY_BUCKET_COUNT] = { 1, 2, 5, 10, 20, 50, 100, 1000 };
-__EXPORT uint32_t latency_actual_min = UINT32_MAX;
-__EXPORT uint32_t latency_actual_max = 0;
-
-/* HRT clock counter */
-static uint64_t hrt_absolute_time_base;
-static uint32_t hrt_counter_wrap_count;
-
-/**
- * Get absolute time
+/*
+ * Scaling helpers between timer ticks and microseconds.
  */
-hrt_abstime hrt_absolute_time(void)
+static inline uint64_t hrt_ticks_to_usec(uint64_t ticks)
 {
-	uint64_t base;
-	uint32_t count;
-	irqstate_t flags;
-
-	flags = enter_critical_section();
-
-	/* Atomic read of base and counter */
-	base = hrt_absolute_time_base;
-	count = getreg32(rCV);
-
-	leave_critical_section(flags);
-
-	/* Convert ticks to microseconds */
-	uint64_t total_ticks = base + count;
-	return (total_ticks * 1000000ULL) / HRT_ACTUAL_FREQ;
+	return (ticks * 1000000ULL) / HRT_TIMER_FREQ;
 }
 
-/**
- * Initialize the HRT
- */
-void hrt_init(void)
+static inline uint64_t hrt_usec_to_ticks(hrt_abstime usec)
 {
-	syslog(LOG_ERR, "[hrt] hrt_init starting\n");
-	sq_init(&callout_queue);
+	return (usec * HRT_TIMER_FREQ + 999999ULL) / 1000000ULL;
+}
 
-	/* Enable peripheral clock for TC0 */
-	uint32_t regval = getreg32(SAM_PMC_PCER0);
-	syslog(LOG_ERR, "[hrt] SAM_PMC_PCER0 before: 0x%08lx\n", (unsigned long)regval);
-	regval |= HRT_TIMER_PCER;
-	putreg32(regval, SAM_PMC_PCER0);
-	syslog(LOG_ERR, "[hrt] SAM_PMC_PCER0 after: 0x%08lx\n", (unsigned long)getreg32(SAM_PMC_PCER0));
+#define rCCR   (HRT_TIMER_BASE + SAM_TC_CCR_OFFSET)
+#define rCMR   (HRT_TIMER_BASE + SAM_TC_CMR_OFFSET)
+#define rCV    (HRT_TIMER_BASE + SAM_TC_CV_OFFSET)
+#define rRA    (HRT_TIMER_BASE + SAM_TC_RA_OFFSET)
+#define rRB    (HRT_TIMER_BASE + SAM_TC_RB_OFFSET)
+#define rRC    (HRT_TIMER_BASE + SAM_TC_RC_OFFSET)
+#define rSR    (HRT_TIMER_BASE + SAM_TC_SR_OFFSET)
+#define rIER   (HRT_TIMER_BASE + SAM_TC_IER_OFFSET)
+#define rIDR   (HRT_TIMER_BASE + SAM_TC_IDR_OFFSET)
+#define rIMR   (HRT_TIMER_BASE + SAM_TC_IMR_OFFSET)
 
-	/* Disable TC clock */
-	putreg32(TC_CCR_CLKDIS, rCCR);
+/*
+ * Queue of callout entries.
+ */
+static struct sq_queue_s  callout_queue;
 
-	/* Configure TC channel mode:
-	 * - Waveform mode
-	 * - Up mode with automatic reset on RC compare
-	 * - Use MCK/8 prescaler (for ~150MHz MCK gives ~19MHz)
-	 */
-	uint32_t cmr = TC_CMR_WAVE | TC_CMR_WAVSEL_UP;
+/* latency baseline (last compare value applied) */
+static uint32_t           latency_baseline;
 
-	/* Select prescaler to get as close to 1MHz as possible */
-	if (HRT_TIMER_CLOCK / 8 > 1000000) {
-		cmr |= TC_CMR_TCCLKS_MCK32;  /* MCK/32 */
-		syslog(LOG_ERR, "[hrt] Using MCK/32 prescaler\n");
-	} else {
-		cmr |= TC_CMR_TCCLKS_MCK8;   /* MCK/8 */
-		syslog(LOG_ERR, "[hrt] Using MCK/8 prescaler\n");
+/* timer count at interrupt (for latency purposes) */
+static uint32_t           latency_actual;
+
+/* latency histogram */
+const uint16_t latency_bucket_count = LATENCY_BUCKET_COUNT;
+const uint16_t latency_buckets[LATENCY_BUCKET_COUNT] = { 1, 2, 5, 10, 20, 50, 100, 1000 };
+__EXPORT uint32_t latency_counters[LATENCY_BUCKET_COUNT + 1];
+
+static volatile uint64_t hrt_absolute_time_base;
+static volatile uint32_t hrt_last_counter_value;
+static volatile uint32_t hrt_counter_wrap_count;
+
+static volatile bool hrt_selftest_expected;
+static volatile bool hrt_selftest_done;
+
+static const hrt_abstime kHrtSelftestDelayUs = 200;
+static const hrt_abstime kHrtSelftestTimeoutUs = 2000;
+
+/* timer-specific functions */
+static void hrt_tim_init(void);
+static int  hrt_tim_isr(int irq, void *context, void *args);
+static void hrt_latency_update(void);
+static uint64_t hrt_ticks_locked(uint32_t *count);
+static hrt_abstime hrt_absolute_time_locked(void);
+static bool hrt_run_selftest(void);
+
+/* callout list manipulation */
+static void hrt_call_internal(struct hrt_call *entry, hrt_abstime deadline, hrt_abstime interval, hrt_callout callout,
+			      void *arg);
+static void hrt_call_enter(struct hrt_call *entry);
+static void hrt_call_reschedule(void);
+static void hrt_call_invoke(void);
+
+static uint64_t hrt_ticks_locked(uint32_t *count_out)
+{
+	uint32_t count = getreg32(rCV);
+
+	if (count < hrt_last_counter_value) {
+		hrt_absolute_time_base += HRT_COUNTER_PERIOD_TICKS;
+		hrt_counter_wrap_count++;
 	}
 
+	hrt_last_counter_value = count;
+
+	if (count_out != NULL) {
+		*count_out = count;
+	}
+
+	return hrt_absolute_time_base + count;
+}
+
+static hrt_abstime hrt_absolute_time_locked(void)
+{
+	return hrt_ticks_to_usec(hrt_ticks_locked(NULL));
+}
+
+static bool hrt_run_selftest(void)
+{
+	const uint32_t selftest_ticks = (uint32_t)hrt_usec_to_ticks(kHrtSelftestDelayUs);
+	hrt_abstime waited = 0;
+
+	irqstate_t flags = px4_enter_critical_section();
+
+	hrt_selftest_expected = true;
+	hrt_selftest_done = false;
+
+	uint32_t current = getreg32(rCV);
+	uint32_t ra = current + selftest_ticks;
+	latency_baseline = ra;
+
+	putreg32(ra, rRA);
+	putreg32(TC_INT_CPAS, rIER);
+
+	px4_leave_critical_section(flags);
+
+	while (!hrt_selftest_done && waited < kHrtSelftestTimeoutUs) {
+		up_udelay(50);
+		waited += 50;
+	}
+
+	flags = px4_enter_critical_section();
+
+	if (sq_peek(&callout_queue) == NULL) {
+		putreg32(TC_INT_CPAS, rIDR);
+	}
+
+	hrt_selftest_expected = false;
+	px4_leave_critical_section(flags);
+
+	return hrt_selftest_done;
+}
+
+
+/**
+ * Initialize the timer we are going to use.
+ */
+static void hrt_tim_init(void)
+{
+	/* Enable the TC peripheral clock */
+	uint32_t regval = getreg32(SAM_PMC_PCER0);
+	regval |= HRT_TIMER_PCER;
+	putreg32(regval, SAM_PMC_PCER0);
+
+	/* Disable TC while we configure it */
+	putreg32(TC_CCR_CLKDIS, rCCR);
+
+	/* Waveform mode, reset on RC compare, clocked from MCK/32 */
+	uint32_t cmr = TC_CMR_WAVE | TC_CMR_WAVSEL_UP | TC_CMR_TCCLKS_MCK32;
 	putreg32(cmr, rCMR);
 
-	/* Set RC to maximum value for free-running mode */
+	/* Set initial compare registers */
 	putreg32(0xFFFFFFFF, rRC);
+	putreg32(0xFFFFFFFF, rRA);
 
-	/* Disable all interrupts */
+	/* Disable/clear interrupts */
 	putreg32(0xFFFFFFFF, rIDR);
-
-	/* Clear status */
 	(void)getreg32(rSR);
 
-	/* Enable TC clock and trigger */
-	putreg32(TC_CCR_CLKEN | TC_CCR_SWTRG, rCCR);
-
-	/* Initialize absolute time base */
-	hrt_absolute_time_base = 0;
-	hrt_counter_wrap_count = 0;
-
-	/* Attach interrupt handler */
+	/* Attach interrupt handler and enable overflow interrupt */
 	irq_attach(HRT_TIMER_VECTOR, hrt_tim_isr, NULL);
-
-	/* Enable overflow interrupt (RC compare for wraparound) */
 	putreg32(TC_INT_CPCS, rIER);
 
-	/* Enable interrupt at NVIC level */
+	/* Start timer */
+	putreg32(TC_CCR_CLKEN | TC_CCR_SWTRG, rCCR);
+
+	/* Enable interrupts at the NVIC */
 	up_enable_irq(HRT_TIMER_VECTOR);
 
-	syslog(LOG_ERR, "[hrt] HRT initialized with interrupts, testing...\n");
+	hrt_last_counter_value = getreg32(rCV);
+	hrt_selftest_expected = false;
+	hrt_selftest_done = false;
 
-	/* Test that timer is running */
-	uint32_t cv1 = getreg32(rCV);
-	for (volatile int i = 0; i < 100000; i++);
-	uint32_t cv2 = getreg32(rCV);
-	syslog(LOG_ERR, "[hrt] Counter test: CV1=0x%08lx CV2=0x%08lx diff=%lu\n",
-		(unsigned long)cv1, (unsigned long)cv2, (unsigned long)(cv2 - cv1));
+	if (!hrt_run_selftest()) {
+		syslog(LOG_ERR, "[hrt] TC0 self-test failed (no CPAS interrupt)\n");
 
-	hrtinfo("HRT initialized\n");
+	} else {
+		syslog(LOG_INFO, "[hrt] TC0 self-test passed\n");
+	}
 }
 
 /**
- * Call callout entries
+ * Handle the compare interrupt by calling the callout dispatcher
+ * and then re-scheduling the next deadline.
  */
-static void hrt_call_invoke(void)
+static int
+hrt_tim_isr(int irq, void *context, void *arg)
 {
-	struct hrt_call *call;
-	hrt_abstime deadline __attribute__((unused));
+	uint32_t status = getreg32(rSR);
+	bool need_reschedule = false;
 
-	/* Read time once at start to avoid critical section issues */
-	uint32_t now_cv = getreg32(rCV);
-	uint64_t base = hrt_absolute_time_base;
-	uint64_t now_ticks = base + now_cv;
-	hrt_abstime now = (now_ticks * 1000000ULL) / HRT_ACTUAL_FREQ;
+	if (status & TC_INT_CPCS) {
+		need_reschedule = true;
+	}
 
-	int max_iterations = 16;  /* Prevent infinite loops */
+	if (status & TC_INT_CPAS) {
+		latency_actual = getreg32(rCV);
+		putreg32(TC_INT_CPAS, rIDR);
 
-	while (max_iterations-- > 0) {
+		if (hrt_selftest_expected) {
+			hrt_selftest_done = true;
+		}
+
+		hrt_latency_update();
+		hrt_call_invoke();
+		need_reschedule = true;
+	}
+
+	if (need_reschedule) {
+		hrt_call_reschedule();
+	}
+
+	return OK;
+}
+
+/**
+ * Fetch a never-wrapping absolute time value in microseconds from
+ * some arbitrary epoch shortly after system start.
+ */
+hrt_abstime
+hrt_absolute_time(void)
+{
+	irqstate_t flags = px4_enter_critical_section();
+	hrt_abstime abstime = hrt_absolute_time_locked();
+	px4_leave_critical_section(flags);
+
+	return abstime;
+}
+
+/**
+ * Store the absolute time in an interrupt-safe fashion
+ */
+void
+hrt_store_absolute_time(volatile hrt_abstime *t)
+{
+	irqstate_t flags = px4_enter_critical_section();
+	*t = hrt_absolute_time();
+	px4_leave_critical_section(flags);
+}
+
+/**
+ * Initialize the high-resolution timing module.
+ */
+void
+hrt_init(void)
+{
+	sq_init(&callout_queue);
+	memset(latency_counters, 0, sizeof(latency_counters));
+	latency_actual = 0;
+	latency_baseline = 0;
+	hrt_absolute_time_base = 0;
+	hrt_last_counter_value = 0;
+	hrt_counter_wrap_count = 0;
+	hrt_selftest_expected = false;
+	hrt_selftest_done = false;
+	hrt_tim_init();
+}
+
+/**
+ * Call callout(arg) after interval has elapsed.
+ */
+void
+hrt_call_after(struct hrt_call *entry, hrt_abstime delay, hrt_callout callout, void *arg)
+{
+	hrt_call_internal(entry,
+			  hrt_absolute_time() + delay,
+			  0,
+			  callout,
+			  arg);
+}
+
+/**
+ * Call callout(arg) at calltime.
+ */
+void
+hrt_call_at(struct hrt_call *entry, hrt_abstime calltime, hrt_callout callout, void *arg)
+{
+	hrt_call_internal(entry, calltime, 0, callout, arg);
+}
+
+/**
+ * Call callout(arg) every period.
+ */
+void
+hrt_call_every(struct hrt_call *entry, hrt_abstime delay, hrt_abstime interval, hrt_callout callout, void *arg)
+{
+	hrt_call_internal(entry,
+			  hrt_absolute_time() + delay,
+			  interval,
+			  callout,
+			  arg);
+}
+
+static void
+hrt_call_internal(struct hrt_call *entry, hrt_abstime deadline, hrt_abstime interval, hrt_callout callout, void *arg)
+{
+	irqstate_t flags = px4_enter_critical_section();
+
+	/* if the entry is currently queued, remove it */
+	/* note that we are using a potentially uninitialized
+	   entry->link here, but it is safe as sq_rem() doesn't
+	   dereference the passed node unless it is found in the
+	   list. So we potentially waste a bit of time searching the
+	   queue for the uninitialized entry->link but we don't do
+	   anything actually unsafe.
+	*/
+	if (entry->deadline != 0) {
+		sq_rem(&entry->link, &callout_queue);
+	}
+
+	entry->deadline = deadline;
+	entry->period = interval;
+	entry->callout = callout;
+	entry->arg = arg;
+
+	hrt_call_enter(entry);
+
+	px4_leave_critical_section(flags);
+}
+
+/**
+ * If this returns true, the call has been invoked and removed from the callout list.
+ *
+ * Always returns false for repeating callouts.
+ */
+bool
+hrt_called(struct hrt_call *entry)
+{
+	return (entry->deadline == 0);
+}
+
+/**
+ * Remove the entry from the callout list.
+ */
+void
+hrt_cancel(struct hrt_call *entry)
+{
+	irqstate_t flags = px4_enter_critical_section();
+
+	sq_rem(&entry->link, &callout_queue);
+	entry->deadline = 0;
+
+	/* if this is a periodic call being removed by the callout, prevent it from
+	 * being re-entered when the callout returns.
+	 */
+	entry->period = 0;
+
+	px4_leave_critical_section(flags);
+}
+
+static void
+hrt_call_enter(struct hrt_call *entry)
+{
+	struct hrt_call	*call, *next;
+
+	call = (struct hrt_call *)sq_peek(&callout_queue);
+
+	if ((call == NULL) || (entry->deadline < call->deadline)) {
+		sq_addfirst(&entry->link, &callout_queue);
+		hrtinfo("call enter at head, reschedule\n");
+		/* we changed the next deadline, reschedule the timer event */
+		hrt_call_reschedule();
+
+	} else {
+		do {
+			next = (struct hrt_call *)sq_next(&call->link);
+
+			if ((next == NULL) || (entry->deadline < next->deadline)) {
+				hrtinfo("call enter after head\n");
+				sq_addafter(&call->link, &entry->link, &callout_queue);
+				break;
+			}
+		} while ((call = next) != NULL);
+	}
+
+	hrtinfo("scheduled\n");
+}
+
+static void
+hrt_call_invoke(void)
+{
+	struct hrt_call	*call;
+	hrt_abstime deadline;
+
+	while (true) {
+		/* get the current time */
+		hrt_abstime now = hrt_absolute_time();
+
 		call = (struct hrt_call *)sq_peek(&callout_queue);
 
 		if (call == NULL) {
@@ -243,140 +479,108 @@ static void hrt_call_invoke(void)
 		}
 
 		sq_rem(&call->link, &callout_queue);
+		hrtinfo("call pop\n");
+
+		/* save the intended deadline for periodic calls */
+		deadline = call->deadline;
+
+		/* zero the deadline, as the call has occurred */
 		call->deadline = 0;
 
-		/* Invoke callback */
+		/* invoke the callout (if there is one) */
 		if (call->callout) {
+			hrtinfo("call %p: %p(%p)\n", call, call->callout, call->arg);
 			call->callout(call->arg);
+		}
+
+		/* if the callout has a non-zero period, it has to be re-entered */
+		if (call->period != 0) {
+			// re-check call->deadline to allow for
+			// callouts to re-schedule themselves
+			// using hrt_call_delay()
+			if (call->deadline <= now) {
+				call->deadline = deadline + call->period;
+			}
+
+			hrt_call_enter(call);
 		}
 	}
 }
 
 /**
- * Reschedule next alarm
- * NOTE: Called from within critical section, so don't call hrt_absolute_time()
+ * Reschedule the next timer interrupt.
+ *
+ * This routine must be called with interrupts disabled.
  */
-static void hrt_call_reschedule(void)
+static void
+hrt_call_reschedule()
 {
-	/* Read counter directly - already in critical section from caller */
-	uint32_t now_cv = getreg32(rCV);
-	uint64_t base = hrt_absolute_time_base;
-	uint64_t now_ticks = base + now_cv;
-	hrt_abstime now_usec = (now_ticks * 1000000ULL) / HRT_ACTUAL_FREQ;
+	irqstate_t flags = px4_enter_critical_section();
 
 	struct hrt_call *next = (struct hrt_call *)sq_peek(&callout_queue);
 
-	if (next != NULL) {
-		hrt_abstime deadline = next->deadline;
-
-		if (deadline < now_usec) {
-			deadline = now_usec + HRT_INTERVAL_MIN;
-		}
-	}
-}
-
-/**
- * HRT interrupt handler
- */
-static int hrt_tim_isr(int irq, void *context, void *arg)
-{
-	uint32_t status;
-
-	/* Read and clear status */
-	status = getreg32(rSR);
-
-	/* Handle counter overflow/wrap */
-	if (status & TC_INT_CPCS) {
-		hrt_counter_wrap_count++;
-	}
-
-	/* Process callouts */
-	hrt_call_invoke();
-
-	/* Reschedule next interrupt */
-	hrt_call_reschedule();
-
-	return OK;
-}
-
-/**
- * Call callout function at specified time
- */
-void hrt_call_at(struct hrt_call *entry, hrt_abstime calltime, hrt_callout callout, void *arg)
-{
-	if (entry == NULL || callout == NULL) {
+	if (next == NULL) {
+		putreg32(TC_INT_CPAS, rIDR);
+		px4_leave_critical_section(flags);
 		return;
 	}
 
-	irqstate_t flags = enter_critical_section();
+	uint32_t current_count;
+	uint64_t now_ticks = hrt_ticks_locked(&current_count);
+	hrt_abstime now = hrt_ticks_to_usec(now_ticks);
+	hrt_abstime deadline = now + HRT_INTERVAL_MAX;
 
-	/* Remove from queue if already scheduled */
-	sq_rem(&entry->link, &callout_queue);
+	if (next->deadline <= (now + HRT_INTERVAL_MIN)) {
+		deadline = now + HRT_INTERVAL_MIN;
 
-	entry->deadline = calltime;
-	entry->callout = callout;
-	entry->arg = arg;
+	} else if (next->deadline < deadline) {
+		deadline = next->deadline;
+	}
 
-	/* Insert into queue in deadline order */
-	struct hrt_call *call;
-	struct hrt_call *prev = NULL;
+	hrt_abstime delta_us = deadline - now;
+	uint64_t delta_ticks = hrt_usec_to_ticks(delta_us);
 
-	for (call = (struct hrt_call *)sq_peek(&callout_queue); call != NULL;
-	     call = (struct hrt_call *)sq_next(&call->link)) {
-		if (call->deadline > calltime) {
-			break;
+	if (delta_ticks == 0) {
+		delta_ticks = 1;
+	}
+
+	uint32_t ra = current_count + (uint32_t)delta_ticks;
+	latency_baseline = ra;
+
+	putreg32(ra, rRA);
+	putreg32(TC_INT_CPAS, rIER);
+
+	px4_leave_critical_section(flags);
+}
+
+static void
+hrt_latency_update(void)
+{
+	uint32_t latency = latency_actual - latency_baseline;
+	unsigned	index;
+
+	/* bounded buckets */
+	for (index = 0; index < LATENCY_BUCKET_COUNT; index++) {
+		if (latency <= latency_buckets[index]) {
+			latency_counters[index]++;
+			return;
 		}
-
-		prev = call;
 	}
 
-	if (prev == NULL) {
-		sq_addfirst(&entry->link, &callout_queue);
-
-	} else {
-		sq_addafter(&prev->link, &entry->link, &callout_queue);
-	}
-
-	hrt_call_reschedule();
-
-	leave_critical_section(flags);
+	/* catch-all at the end */
+	latency_counters[index]++;
 }
 
-/**
- * Call callout function after delay
- */
-void hrt_call_after(struct hrt_call *entry, hrt_abstime delay, hrt_callout callout, void *arg)
+void
+hrt_call_init(struct hrt_call *entry)
 {
-	hrt_call_at(entry, hrt_absolute_time() + delay, callout, arg);
+	memset(entry, 0, sizeof(*entry));
 }
 
-/**
- * Call callout function at periodic intervals
- */
-void hrt_call_every(struct hrt_call *entry, hrt_abstime delay, hrt_abstime interval, hrt_callout callout, void *arg)
+void
+hrt_call_delay(struct hrt_call *entry, hrt_abstime delay)
 {
-	entry->period = interval;
-	hrt_call_after(entry, delay, callout, arg);
-}
-
-/**
- * Cancel a callout
- */
-void hrt_cancel(struct hrt_call *entry)
-{
-	irqstate_t flags = enter_critical_section();
-
-	sq_rem(&entry->link, &callout_queue);
-	entry->deadline = 0;
-	entry->period = 0;
-
-	leave_critical_section(flags);
-}
-
-/* CPU load monitoring support function */
-void hrt_store_absolute_time(volatile hrt_abstime *t)
-{
-	*t = hrt_absolute_time();
+	entry->deadline = hrt_absolute_time() + delay;
 }
 
 #endif /* HRT_TIMER */

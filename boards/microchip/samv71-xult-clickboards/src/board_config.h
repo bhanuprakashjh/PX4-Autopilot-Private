@@ -71,7 +71,14 @@
 #define BOARD_HAS_CONTROL_STATUS_LEDS      1
 #define BOARD_ARMED_STATE_LED  LED_BLUE
 
-#define  FLASH_BASED_PARAMS
+#define GPIO_SPI0_CS_ICM20689    (GPIO_OUTPUT|GPIO_OUTPUT_SET|GPIO_PORT_PIOA|GPIO_PIN11)
+#define GPIO_SPI0_DRDY_ICM20689  (GPIO_INPUT|GPIO_CFG_PULLUP|GPIO_PORT_PIOA|GPIO_PIN12)
+
+/* Primary storage defaults to SD card. Enable BOARD_HAS_FRAM_CLICK (and re-add
+ * FLASH_BASED_PARAMS) only when a FRAM Click board or other flash backend is
+ * present.
+ */
+// #define FLASH_BASED_PARAMS
 
 /* ADC Channels ***********************************************************************************/
 
@@ -107,6 +114,17 @@
 #define HRT_TIMER               0  /* use TC0 channel 0 for the HRT */
 #define HRT_TIMER_CHANNEL       0  /* use capture/compare channel 0 */
 
+/* HSMCI SD Card ***************************************************************************/
+
+#ifdef CONFIG_SAMV7_HSMCI0
+#  define HSMCI0_SLOTNO      0
+#  define HSMCI0_MINOR       0
+  /* Card Detect: PD18, active low, interrupt on both edges */
+#  define GPIO_HSMCI0_CD     (GPIO_INPUT | GPIO_CFG_DEFAULT | GPIO_CFG_DEGLITCH | \
+                              GPIO_INT_BOTHEDGES | GPIO_PORT_PIOD | GPIO_PIN18)
+#  define IRQ_HSMCI0_CD      SAM_IRQ_PD18
+#endif
+
 /* USB ***********************************************************************************/
 
 /* SAMV71 has USB high-speed device */
@@ -123,9 +141,12 @@
 
 #define PX4_GPIO_INIT_LIST { \
 		GPIO_nLED_BLUE,           \
+		GPIO_SPI0_CS_ICM20689,    \
+		GPIO_SPI0_DRDY_ICM20689,  \
 	}
 
-#define BOARD_ENABLE_CONSOLE_BUFFER
+// TEMPORARILY DISABLED: Console buffer causes system hang on warnings/errors (known board issue)
+// #define BOARD_ENABLE_CONSOLE_BUFFER
 
 #define BOARD_NUM_IO_TIMERS 3
 

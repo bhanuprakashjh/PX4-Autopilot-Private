@@ -197,6 +197,7 @@ list(APPEND OPTIONAL_BOARD_RC
 	rc.board_sensors
 	rc.board_extras
 	rc.board_mavlink
+	rc.logging
 )
 
 foreach(board_rc_file ${OPTIONAL_BOARD_RC})
@@ -223,6 +224,22 @@ foreach(board_rc_file ${OPTIONAL_BOARD_RC})
 	endif()
 
 endforeach()
+
+if(EXISTS "${PX4_BOARD_DIR}/src/etc")
+	add_custom_command(
+		OUTPUT
+			board_src_etc.stamp
+		COMMAND ${CMAKE_COMMAND} -E copy_directory ${PX4_BOARD_DIR}/src/etc ${romfs_gen_root_dir}
+		COMMAND ${CMAKE_COMMAND} -E touch board_src_etc.stamp
+		DEPENDS
+			romfs_copy.stamp
+		COMMENT "ROMFS: overlaying ${PX4_BOARD_DIR}/src/etc"
+	)
+
+	list(APPEND extras_dependencies
+		board_src_etc.stamp
+	)
+endif()
 
 if(config_additional_init)
 	if(EXISTS "${PX4_BOARD_DIR}/init/${config_additional_init}")

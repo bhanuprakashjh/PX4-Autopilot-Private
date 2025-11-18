@@ -1,0 +1,7 @@
+menuconfig SYSTEMCMDS_LITTLEFS_MOUNT
+	bool "littlefs_mount"
+	default n
+	depends on PLATFORM_NUTTX
+	select FS_LITTLEFS
+	---help---
+		Enable support for littlefs_mount command

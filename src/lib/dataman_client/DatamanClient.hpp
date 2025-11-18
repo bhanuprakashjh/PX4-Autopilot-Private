@@ -184,6 +184,7 @@ private:
 	px4_pollfd_struct_t _fds;
 
 	uint8_t _client_id{0};
+	bool _available{false};  // TEMPORARY: Silently fail if dataman service not available
 
 	perf_counter_t _sync_perf{nullptr};
 
