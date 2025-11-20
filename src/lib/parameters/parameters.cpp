@@ -44,6 +44,7 @@
 #define PARAM_IMPLEMENTATION
 #include "param.h"
 #include "param_translation.h"
+#include <new>
 #include <parameters/px4_parameters.hpp>
 #include <lib/tinybson/tinybson.h>
 
@@ -100,9 +101,15 @@ static ParamAutosave *autosave_instance {nullptr};
 static px4::AtomicBitset<param_info_count> params_active;  // params found
 static px4::AtomicBitset<param_info_count> params_unsaved;
 
-static ConstLayer firmware_defaults;
-static DynamicSparseLayer runtime_defaults{&firmware_defaults};
-DynamicSparseLayer user_config{&runtime_defaults};
+static uint64_t _firmware_defaults_storage[(sizeof(ConstLayer) + sizeof(uint64_t) - 1) / sizeof(uint64_t)];
+static uint64_t _runtime_defaults_storage[(sizeof(DynamicSparseLayer) + sizeof(uint64_t) - 1) / sizeof(uint64_t)];
+static uint64_t _user_config_storage[(sizeof(DynamicSparseLayer) + sizeof(uint64_t) - 1) / sizeof(uint64_t)];
+
+static ConstLayer &firmware_defaults = *reinterpret_cast<ConstLayer *>(_firmware_defaults_storage);
+static DynamicSparseLayer &runtime_defaults = *reinterpret_cast<DynamicSparseLayer *>(_runtime_defaults_storage);
+DynamicSparseLayer &user_config = *reinterpret_cast<DynamicSparseLayer *>(_user_config_storage);
+
+static bool g_params_constructed{false};
 
 /** parameter update topic handle */
 #if not defined(CONFIG_PARAM_REMOTE)
@@ -129,6 +136,13 @@ static pthread_mutex_t file_mutex  =
 void
 param_init()
 {
+	if (!g_params_constructed) {
+		new (&firmware_defaults) ConstLayer();
+		new (&runtime_defaults) DynamicSparseLayer(&firmware_defaults);
+		new (&user_config) DynamicSparseLayer(&runtime_defaults);
+		g_params_constructed = true;
+	}
+
 	param_export_perf = perf_alloc(PC_ELAPSED, "param: export");
 	param_find_perf = perf_alloc(PC_COUNT, "param: find");
 	param_get_perf = perf_alloc(PC_COUNT, "param: get");
