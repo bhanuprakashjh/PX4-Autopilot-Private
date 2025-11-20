@@ -14,58 +14,84 @@ PX4 is highly portable, OS-independent and supports Linux, NuttX and MacOS out o
 
 ## Custom Board Support: ATSAMV71-XULT
 
-This repository includes support for the **Microchip ATSAMV71-XULT development board** with Click sensor boards for drone flight control applications.
+This repository includes **custom PX4 implementations** for the **Microchip ATSAMV71-XULT development board** with comprehensive fixes and documentation.
 
-### Hardware Configuration
-- **MCU:** ATSAMV71Q21B (ARM Cortex-M7 @ 300MHz)
-- **Flash:** 2MB (40.97% used = 859KB firmware)
-- **RAM:** 384KB (5.60% used = 22KB)
-- **Sensors:** ICM20689 IMU, AK09916 magnetometer, DPS310 barometer (via MikroElektronika Click boards)
+### 🌿 Branch Structure
 
-### Build Status
-✅ **Firmware builds successfully** (commit: 7afa7db)
-- Binary size: 859,184 bytes
-- Build system: CMake + Ninja with NuttX RTOS
-- Target: `make microchip_samv71-xult-clickboards_default`
+This repository maintains two branches for SAMV71-XULT development:
 
-### Features Implemented
-- GPIO interrupt support for sensor DRDY signals
-- ADC battery monitoring (voltage/current sensing)
-- I2C bus configuration (TWIHS0 for external sensors)
-- High-resolution timer (HRT) using TC0
-- USB CDC/ACM serial console
-- Linker script for SAMV71Q21B memory layout
-- Board identity and MCU version detection
+#### **`main`** - Original/Baseline Implementation (You are here)
+Standard PX4 baseline for SAMV71 with basic hardware support.
+- **Status:** Reference implementation
+- **Use Case:** Starting point, comparison baseline
+- **Documentation:** [boards/microchip/samv71-xult-clickboards/PORTING_NOTES.md](boards/microchip/samv71-xult-clickboards/PORTING_NOTES.md)
 
-### Known Limitations
-⚠️ **Not Yet Implemented:**
-- PWM outputs (timer configuration empty - cannot control motors/servos)
-- SPI device configuration (waiting for hardware testing)
-- GPIO pin mappings are placeholders (need schematic verification)
-- USB VBUS detection stubbed
+#### **`samv7-custom`** - Enhanced Implementation ⭐ **Recommended for Development**
+Fully working implementation with critical bug fixes and comprehensive documentation.
 
-⏳ **Hardware Testing Pending:**
-- Serial console verification
-- I2C bus detection
-- Sensor integration
-- Full system testing
+**✅ Major Fixes Implemented:**
+- **Parameter Storage Fix** - Manual construction pattern fixes C++ static initialization bug
+- **SD Card Integration** - Complete FAT32 support with parameter persistence
+- **HRT Implementation** - Reliable TC0 timer configuration
+- **DMA Cache Coherency** - Proper memory management for SDIO
+- **Safe Mode Configuration** - Stable baseline for incremental development
 
-### Documentation
-For detailed porting notes, build instructions, and development roadmap, see:
-- [boards/microchip/samv71-xult-clickboards/PORTING_NOTES.md](boards/microchip/samv71-xult-clickboards/PORTING_NOTES.md)
+**✅ Current Status (November 2025):**
+- Flash: 920 KB / 2 MB (43.91%)
+- SRAM: 18 KB / 384 KB (4.75%)
+- Parameter set/save/persistence: Working
+- SD card I/O: Working
+- HRT self-test: Passing
+- Debugging tools: dmesg, hrt_test enabled
 
-### Quick Start
+**📚 Complete Documentation Suite (30+ documents):**
+
+Navigate all documentation starting from these entry points:
+- **[DOCUMENTATION_INDEX.md](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/blob/samv7-custom/DOCUMENTATION_INDEX.md)** - Central navigation hub
+- **[CURRENT_STATUS.md](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/blob/samv7-custom/CURRENT_STATUS.md)** - Latest system state
+- **[README_SAMV7.md](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/blob/samv7-custom/README_SAMV7.md)** - Branch overview
+- **[SAMV7_PARAM_STORAGE_FIX.md](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/blob/samv7-custom/SAMV7_PARAM_STORAGE_FIX.md)** - Critical fixes
+- **[KNOWN_GOOD_SAFE_MODE_CONFIG.md](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/blob/samv7-custom/KNOWN_GOOD_SAFE_MODE_CONFIG.md)** - Reference config
+
+### 🚀 Quick Start - Switch to Enhanced Branch
+
+**⚠️ Note:** For active development, use the `samv7-custom` branch which has all fixes and documentation.
+
 ```bash
+# Clone repository
+git clone https://github.com/bhanuprakashjh/PX4-Autopilot-Private.git
+cd PX4-Autopilot-Private
+
+# Switch to enhanced branch (recommended)
+git checkout samv7-custom
+git submodule update --init --recursive
+
 # Build firmware
 make microchip_samv71-xult-clickboards_default
 
-# Flash via BOSSA bootloader (requires SAM-BA mode)
-cd build/microchip_samv71-xult-clickboards_default
-sudo bossac -e -w -v -b -R -p /dev/ttyACM0 microchip_samv71-xult-clickboards_default.bin
-
-# Connect serial console (57600 baud)
-minicom -D /dev/ttyACM0 -b 57600
+# Flash via OpenOCD
+openocd -f interface/cmsis-dap.cfg -f target/atsamv.cfg \
+  -c "program build/microchip_samv71-xult-clickboards_default/microchip_samv71-xult-clickboards_default.elf verify reset exit"
 ```
+
+### Hardware Configuration
+- **MCU:** ATSAM V71Q21 (ARM Cortex-M7 @ 300MHz)
+- **Flash:** 2MB
+- **SRAM:** 384KB
+- **SD Card:** FAT32 support (tested with 16GB)
+- **Sensors:** I2C bus ready for ICM20689 IMU, magnetometer, barometer
+
+### 🎯 Recommended: Use samv7-custom Branch
+
+The **samv7-custom** branch contains:
+- ✅ All critical bug fixes
+- ✅ Working parameter storage
+- ✅ SD card integration
+- ✅ Comprehensive documentation (30+ files)
+- ✅ Debugging tools enabled
+- ✅ Known-good baseline configuration
+
+**View the enhanced branch:** [Switch to samv7-custom](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/tree/samv7-custom)
 
 ---
 
