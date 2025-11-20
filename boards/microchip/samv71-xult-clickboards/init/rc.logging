@@ -1,13 +1,4 @@
 #!/bin/sh
 #
-# SAMV71-XULT board-specific logging configuration
-#
-
-# TEMPORARILY DISABLED: Skip logger startup for SD card debugging
-# Logger tries to write to storage (SD card or flash), which hangs the system
-# when no storage is available
-#
-# The default rc.logging would start the logger module
-# This override intentionally does nothing to prevent logger from starting
-
-echo "INFO: Logging disabled for SD card debugging"
+# Disable logging for SD debugging
+echo "INFO [logger] logging disabled for SD card debugging"

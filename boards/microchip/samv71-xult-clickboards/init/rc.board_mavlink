@@ -1,18 +1,5 @@
 #!/bin/sh
 #
-# SAMV71-XULT board-specific MAVLink configuration
-#
-
-# TEMPORARILY DISABLED: Disable all MAVLink instances for SD card debugging
-# Problem: param set fails without storage backend (no SD, no working flash params)
-# Solution: Set SERIAL_DEV=none for all MAV configs to prevent rc.serial from starting mavlink
-#
-# rc.serial uses these environment variables to determine if mavlink should start:
-# - If SERIAL_DEV is "none", it skips the mavlink start command
-# We override the serial port detection by pre-setting SERIAL_DEV to none
-
+# Disable all MAVLink instances for SD debugging
 echo "INFO: Board mavlink config - disabling all mavlink for SD debugging"
-
-# The rc.serial script will check these variables
-# By setting SERIAL_DEV=none before rc.serial runs, we prevent mavlink start
 set SERIAL_DEV none
