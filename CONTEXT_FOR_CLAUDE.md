@@ -15,7 +15,7 @@
 
 ---
 
-## Current Status: BLOCKED - Awaiting Implementation
+## Current Status: ROOT CAUSE IDENTIFIED - Solutions Documented
 
 ### ✅ What's Working
 
@@ -39,104 +39,99 @@
    - Services disabled for testing (mavlink, logger, dataman)
 
 5. **Documentation**
-   - 20+ comprehensive guides created (21,000+ lines)
+   - 22 comprehensive guides created (23,000+ lines)
    - All committed to `samv7-custom` branch
+   - **NEW:** Complete vtable corruption analysis with solutions
 
-### ⚠️ CRITICAL ISSUE - Parameter Storage Blocked
+### ⚠️ CRITICAL ISSUE - Vtable Corruption (Hardfault at 0x4d500004)
 
-**Problem:** SAMV7 C++ static initialization bug
+**Problem:** Hardfault during parameter system initialization
 
 **Root Cause:**
-- `malloc()` fails during global object construction (before `main()`)
-- `DynamicSparseLayer` objects (`runtime_defaults`, `user_config`) have ZERO allocated slots
-- Located in: `src/lib/parameters/parameters.cpp:103-105`
+- NuttX on SAMV7 calls `up_cxxinitialize()` in `sam_boot.c` BEFORE heap initialization
+- `malloc()` fails during global object construction
+- `DynamicSparseLayer` objects get corrupted during static init
+- Vtable pointer overwritten with "MP" magic bytes (0x4D='M', 0x50='P') from BSON file headers
+- When code calls virtual methods, CPU jumps to 0x4d500004 → Instruction Access Violation
 
 **Evidence:**
 ```bash
-# Boot log shows:
-INFO  [parameters] runtime_defaults size: 0 byteSize: 0
-INFO  [parameters] user_config size: 0 byteSize: 0
+# Crash signature:
+arm_hardfault: PANIC!!! Hard Fault!
+PC: 4d500004  ← "MP" magic header being executed as code!
+CFSR: 00000001 ← Instruction Access Violation
+Task: param
 ```
 
-**Symptoms:**
-- `param set CAL_ACC0_ID 12345` → "failed to store param" error
-- `param save` creates 5-byte files (BSON header only, no parameter data)
-- Parameters can be read but not modified or saved
+**Why All 5 Fix Attempts Failed:**
+1. Lazy allocation - Fixed Time 4, but vtable corrupted at Time 2
+2. Fallback defaults - Can't validate corrupted vtable
+3. Bounds checking + _sort fix - Defensive but insufficient
+4. Placement new with destructor - Would crash freeing garbage pointer
+5. Placement new without destructor - Undefined behavior
 
-**Why Attempted Runtime Fixes Failed:**
-- Calling destructor → PANIC (tries to `free()` garbage pointer)
-- Placement new → Memory corruption and crashes
-- Objects are too corrupted to reconstruct at runtime
+**Complete Analysis:** See `SAMV7_VTABLE_CORRUPTION_ANALYSIS.md` (1,534 lines)
 
 ---
 
-## 🎯 THE SOLUTION (Ready to Implement)
+## 🎯 THE SOLUTIONS (Two Approaches)
 
-### Lazy Allocation in DynamicSparseLayer
+**Read `SAMV7_VTABLE_CORRUPTION_ANALYSIS.md` for complete details.**
 
-**File to Modify:** `src/lib/parameters/DynamicSparseLayer.h`
+### Solution A: Manual Construction (Application-Level) ⭐ Recommended First
 
-**Strategy:** Defer `malloc()` from constructor to first use when heap is guaranteed available.
+**File to Modify:** `src/lib/parameters/parameters.cpp`
 
-**Implementation Steps:**
+**Strategy:** Use aligned storage buffers and placement new to defer object construction until `param_init()` when heap is ready.
 
-1. **Add member variable** (line ~249):
-   ```cpp
-   int _n_prealloc;  // Remember prealloc size for lazy init
-   ```
+**Key Changes:**
+```cpp
+// Replace static objects with aligned storage buffers
+static uint64_t _firmware_defaults_storage[sizeof(ConstLayer) / 8 + 1];
+static uint64_t _runtime_defaults_storage[sizeof(DynamicSparseLayer) / 8 + 1];
+static uint64_t _user_config_storage[sizeof(DynamicSparseLayer) / 8 + 1];
 
-2. **Modify constructor** (lines 43-59) to defer allocation:
-   ```cpp
-   DynamicSparseLayer(ParamLayer *parent, int n_prealloc = 32, int n_grow = 4)
-       : ParamLayer(parent), _n_prealloc(n_prealloc), _n_slots(0), _n_grow(n_grow)
-   {
-       _slots.store(nullptr);  // Lazy allocation - defer until first use
-   }
-   ```
+// Create references (rest of PX4 sees normal objects)
+static ConstLayer &firmware_defaults =
+    *reinterpret_cast<ConstLayer*>(_firmware_defaults_storage);
+DynamicSparseLayer &user_config =
+    *reinterpret_cast<DynamicSparseLayer*>(_user_config_storage);
 
-3. **Add `_ensure_allocated()` helper** (in private section):
-   ```cpp
-   bool _ensure_allocated()
-   {
-       // Fast path: already allocated
-       if (_slots.load() != nullptr) {
-           return true;
-       }
+// Manually construct in param_init()
+void param_init() {
+    new (&firmware_defaults) ConstLayer();
+    new (&user_config) DynamicSparseLayer(&runtime_defaults);
+    // ...
+}
+```
 
-       // Lazy allocation on first use (heap now available)
-       Slot *slots = (Slot *)malloc(sizeof(Slot) * _n_prealloc);
+**Pros:** No NuttX changes, works on all platforms, easier to test
+**Cons:** Slightly more complex code
 
-       if (slots == nullptr) {
-           PX4_ERR("Failed to allocate memory for dynamic sparse layer");
-           return false;
-       }
+### Solution B: OS-Level Boot Order Fix (Long-term)
 
-       // Initialize slots
-       for (int i = 0; i < _n_prealloc; i++) {
-           slots[i] = {UINT16_MAX, param_value_u{}};
-       }
+**Files to Modify:**
+- `platforms/nuttx/NuttX/arch/arm/src/samv7/sam_boot.c`
+- Verify `sched/init/nx_start.c` order
 
-       // Atomic swap for thread safety
-       Slot *expected = nullptr;
-       if (!_slots.compare_exchange(&expected, slots)) {
-           // Another thread won the race, free our allocation
-           free(slots);
-       } else {
-           // We won the race, update slot count
-           _n_slots = _n_prealloc;
-       }
+**Strategy:** Remove `up_cxxinitialize()` from `sam_boot.c`, let `nx_start.c` call it after heap init.
 
-       return true;
-   }
-   ```
+**Key Changes:**
+```c
+// sam_boot.c - DELETE THIS:
+// #ifdef CONFIG_HAVE_CXXINITIALIZE
+//   up_cxxinitialize();  // TOO EARLY!
+// #endif
 
-4. **Add allocation checks** to methods:
-   - `store()` (line 68): Add `if (!_ensure_allocated()) return false;` at start
-   - `get()` (line 113): Add `if (!_ensure_allocated()) { /* fallback */ }`
-   - `contains()` (line 94): Add allocation check
-   - `reset()` (line 133): Add allocation check
+// nx_start.c already has correct order:
+kmm_initialize();        // Heap ready
+up_cxxinitialize();      // NOW safe for constructors
+```
 
-**Complete Implementation Plan:** See `SAMV7_PARAM_STORAGE_FIX.md`
+**Pros:** Fixes root cause for all C++ code, cleaner architecture
+**Cons:** Requires NuttX rebuild, more thorough testing needed
+
+**Recommendation:** Implement Solution A first for quick validation, then Solution B for upstream contribution.
 
 ---
 
@@ -197,10 +192,12 @@ git branch  # Should show: * samv7-custom
 - `platforms/nuttx/src/px4/common/board_dma_alloc.c` - Fixed DMA coherency
 
 ### Documentation (All Complete)
-- `SAMV7_PARAM_STORAGE_FIX.md` - Implementation guide (YOU MUST READ THIS)
+- `SAMV7_VTABLE_CORRUPTION_ANALYSIS.md` - **COMPLETE ROOT CAUSE ANALYSIS** (1,534 lines) ⭐ **READ THIS FIRST**
+- `SAMV7_PARAM_STORAGE_FIX.md` - Original lazy allocation attempt (failed)
 - `SAMV7_ACHIEVEMENTS.md` - Progress log and lessons learned
 - `RESEARCH_TOPICS.md` - Study guide (14 technical topics)
 - `README_SAMV7.md` - Branch usage guide
+- `CONTEXT_FOR_CLAUDE.md` - This file (session resumption context)
 
 ---
 
@@ -249,15 +246,29 @@ This proves the SAMV7 issue is known and already has partial workarounds.
 
 ## What To Do Next (Immediate Action)
 
-### Step 1: Implement Lazy Allocation (2-4 hours)
-1. Read `SAMV7_PARAM_STORAGE_FIX.md` carefully
-2. Modify `src/lib/parameters/DynamicSparseLayer.h`
-3. Add `_n_prealloc` member
-4. Change constructor to defer malloc
-5. Add `_ensure_allocated()` helper
-6. Add checks to `store()`, `get()`, `contains()`, `reset()`
+### Step 1: Choose Implementation Approach
+1. **Read `SAMV7_VTABLE_CORRUPTION_ANALYSIS.md`** (complete root cause and solutions)
+2. **Decide:** Solution A (manual construction) or Solution B (sam_boot.c fix)?
+   - **Solution A recommended first:** Faster to test, no NuttX changes
+   - **Solution B for long-term:** Fixes OS root cause, cleaner
 
-### Step 2: Build and Test
+### Step 2: Implement Solution A (Manual Construction) - Recommended
+
+**File:** `src/lib/parameters/parameters.cpp`
+
+1. Add `#include <new>` at top
+2. Replace static object definitions with aligned storage buffers:
+   ```cpp
+   static uint64_t _user_config_storage[sizeof(DynamicSparseLayer) / 8 + 1];
+   DynamicSparseLayer &user_config = *reinterpret_cast<DynamicSparseLayer*>(_user_config_storage);
+   ```
+3. Add manual construction in `param_init()`:
+   ```cpp
+   new (&user_config) DynamicSparseLayer(&runtime_defaults);
+   ```
+4. See SAMV7_VTABLE_CORRUPTION_ANALYSIS.md lines 550-650 for complete code
+
+### Step 3: Build and Test
 ```bash
 make microchip_samv71-xult-clickboards_default
 make microchip_samv71-xult-clickboards_default upload
@@ -290,16 +301,25 @@ git push origin samv7-custom
 
 ---
 
-## TODO List (From TodoWrite Tool)
+## TODO List (Current State)
 
-- [ ] Implement lazy allocation in DynamicSparseLayer.h
-- [ ] Add _ensure_allocated() helper method with thread safety
-- [ ] Update constructor to defer malloc until first use
-- [ ] Add allocation checks to store(), get(), contains(), reset()
-- [ ] Build firmware with lazy allocation fix
+### Root Cause Analysis (✅ Complete)
+- [x] Identify vtable corruption mechanism (0x4d500004 = "MP" magic bytes)
+- [x] Document all 5 failed fix attempts with explanations
+- [x] Create comprehensive analysis document (1,534 lines)
+- [x] Design Solution A: Manual construction fix
+- [x] Design Solution B: sam_boot.c OS-level fix
+
+### Implementation (⏳ Pending - Choose A or B)
+- [ ] Choose solution approach (A recommended first)
+- [ ] Implement chosen solution
+- [ ] Build firmware with fix
+- [ ] Flash to board and verify boot without hardfault
 - [ ] Test param set command on hardware
 - [ ] Test param save and verify file size > 5 bytes
 - [ ] Test parameter persistence across reboot
+
+### System Integration (⏳ After fix working)
 - [ ] Re-enable dataman in boot scripts
 - [ ] Re-enable logger in boot scripts
 - [ ] Re-enable mavlink autostart
@@ -449,21 +469,26 @@ cat README_SAMV7.md                 # Branch usage
 
 ---
 
-**Last Updated:** November 19, 2025
-**Status:** Ready for lazy allocation implementation
-**Estimated Time to Fix:** 2-4 hours of focused work
+**Last Updated:** November 20, 2025
+**Status:** Root cause fully analyzed, two solutions documented
+**Estimated Time to Implement:** 2-3 hours (Solution A) or 4-6 hours (Solution B)
 
 ---
 
 ## Final Note
 
-The solution is fully designed and documented. The implementation is straightforward:
-1. Read `SAMV7_PARAM_STORAGE_FIX.md`
-2. Modify `DynamicSparseLayer.h` as specified
-3. Build, test, verify
-4. Re-enable services
-5. Success!
+After extensive debugging through 5 failed fix attempts, we have identified the exact root cause:
 
-All the hard debugging and analysis work is complete. Now it's just careful implementation of the designed solution.
+**The Problem:** NuttX on SAMV7 runs C++ global constructors before heap initialization. The vtable pointer gets overwritten with "MP" magic bytes (0x4d500004) from BSON file headers. When code tries to call virtual methods, the CPU jumps to non-executable memory → hardfault.
 
-**You can do this!** 🚀
+**The Solutions:** Two fully documented approaches:
+1. **Solution A (Manual Construction):** Application-level fix using aligned storage buffers and placement new in `param_init()`. Faster to implement, no OS changes needed.
+2. **Solution B (sam_boot.c Fix):** OS-level fix removing early `up_cxxinitialize()` call. Fixes root cause for all C++ code on SAMV7.
+
+**Next Steps:**
+1. Read `SAMV7_VTABLE_CORRUPTION_ANALYSIS.md` (1,534 lines, complete implementation guides)
+2. Implement Solution A (recommended first)
+3. Test on hardware
+4. Consider implementing Solution B for upstream contribution
+
+All the debugging is complete. The analysis is thorough. The solutions are ready. It's time to implement and verify.
