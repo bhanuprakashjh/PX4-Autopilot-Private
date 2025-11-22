@@ -41,21 +41,13 @@ class DynamicSparseLayer : public ParamLayer
 {
 public:
 	DynamicSparseLayer(ParamLayer *parent, int n_prealloc = 32, int n_grow = 4) : ParamLayer(parent),
-		_n_slots(n_prealloc), _n_grow(n_grow)
+		_n_prealloc(n_prealloc), _n_slots(0), _n_grow(n_grow)
 	{
-		Slot *slots = (Slot *)malloc(sizeof(Slot) * n_prealloc);
-
-		if (slots == nullptr) {
-			PX4_ERR("Failed to allocate memory for dynamic sparse layer");
-			_n_slots = 0;
-			return;
-		}
-
-		for (int i = 0; i < _n_slots; i++) {
-			slots[i] = {UINT16_MAX, param_value_u{}};
-		}
-
-		_slots.store(slots);
+		// SAMV7 FIX: Lazy allocation - defer malloc() until first use
+		// On SAMV7, malloc() fails during C++ static initialization phase
+		// because the heap is not ready yet. Deferring allocation to runtime
+		// when heap is available fixes "param set" and "param save" failures.
+		_slots.store(nullptr);
 	}
 
 	virtual ~DynamicSparseLayer()
@@ -68,6 +60,12 @@ public:
 	bool store(param_t param, param_value_u value) override
 	{
 		AtomicTransaction transaction;
+
+		// SAMV7 FIX: Ensure allocation before accessing slots
+		if (!_ensure_allocated()) {
+			return false;
+		}
+
 		Slot *slots = _slots.load();
 
 		const int index = _getIndex(param);
@@ -94,6 +92,12 @@ public:
 	bool contains(param_t param) const override
 	{
 		const AtomicTransaction transaction;
+
+		// SAMV7 FIX: If not allocated, we don't contain anything
+		if (!_ensure_allocated()) {
+			return false;
+		}
+
 		return _getIndex(param) < _next_slot;
 	}
 
@@ -101,6 +105,12 @@ public:
 	{
 		px4::AtomicBitset<PARAM_COUNT> set;
 		const AtomicTransaction transaction;
+
+		// SAMV7 FIX: If not allocated, return empty bitset
+		if (!_ensure_allocated()) {
+			return set;
+		}
+
 		Slot *slots = _slots.load();
 
 		for (int i = 0; i < _next_slot; i++) {
@@ -113,6 +123,16 @@ public:
 	param_value_u get(param_t param) const override
 	{
 		const AtomicTransaction transaction;
+
+		// SAMV7 FIX: If not allocated yet, fall back to parent or firmware defaults
+		if (!_ensure_allocated()) {
+			if (_parent == nullptr) {
+				return px4::parameters[param].val;
+			}
+
+			return _parent->get(param);
+		}
+
 		Slot *slots = _slots.load();
 
 		const int index = _getIndex(param);
@@ -133,6 +153,12 @@ public:
 	void reset(param_t param) override
 	{
 		const AtomicTransaction transaction;
+
+		// SAMV7 FIX: If not allocated, nothing to reset
+		if (!_ensure_allocated()) {
+			return;
+		}
+
 		int index = _getIndex(param);
 		Slot *slots = _slots.load();
 
@@ -163,6 +189,44 @@ private:
 		param_t param;
 		param_value_u value;
 	};
+
+	// SAMV7 FIX: Lazy allocation helper
+	// On SAMV7, malloc() fails during C++ static initialization.
+	// This method defers allocation until first use when heap is ready.
+	bool _ensure_allocated() const
+	{
+		// Fast path: already allocated
+		if (_slots.load() != nullptr) {
+			return true;
+		}
+
+		// Lazy allocation on first use (heap now available)
+		Slot *slots = (Slot *)malloc(sizeof(Slot) * _n_prealloc);
+
+		if (slots == nullptr) {
+			PX4_ERR("Failed to allocate memory for dynamic sparse layer (lazy)");
+			return false;
+		}
+
+		// Initialize slots
+		for (int i = 0; i < _n_prealloc; i++) {
+			slots[i] = {UINT16_MAX, param_value_u{}};
+		}
+
+		// Atomic compare-exchange for thread safety
+		// Only one thread wins the race; losers free their allocation
+		Slot *expected = nullptr;
+
+		if (!const_cast<px4::atomic<Slot *>&>(_slots).compare_exchange(&expected, slots)) {
+			// Another thread won the race, free our allocation
+			free(slots);
+		} else {
+			// We won the race, update slot count
+			const_cast<int &>(_n_slots) = _n_prealloc;
+		}
+
+		return true;
+	}
 
 	static int _slotCompare(const void *a, const void *b)
 	{
@@ -245,6 +309,7 @@ private:
 	}
 
 	int _next_slot = 0;
+	const int _n_prealloc;  // SAMV7 FIX: Remember prealloc size for lazy init
 	int _n_slots = 0;
 	const int _n_grow;
 	px4::atomic<Slot *> _slots{nullptr};
