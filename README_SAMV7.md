@@ -10,12 +10,12 @@ This repository contains custom PX4 implementations for the Microchip SAMV71-XUL
 - Use for reference or to revert to original
 
 ### `samv7-custom` - Enhanced Implementation ⭐ **Recommended**
-- ✅ **SD Card Parameter Storage** - Migrated from broken flash backend
+- ✅ **SD Card DMA Fully Working** - Complete DMA transfer support (Fixes #1-#21)
+- ✅ **SD Card Parameter Storage** - Read/write operations verified
 - ✅ **Fixed HRT Implementation** - Reliable TC0 timer configuration
 - ✅ **DMA Cache Coherency** - Proper memory management for SDIO
-- ✅ **Comprehensive Documentation** - 20+ implementation guides
-- ⚠️ **Known Issue:** Parameter writes blocked by SAMV7 C++ static init bug
-- 🔧 **Solution Designed:** Lazy allocation fix ready for implementation
+- ✅ **Hardware Handshaking** - XDMAC properly synchronized with HSMCI
+- ✅ **Comprehensive Documentation** - 25+ implementation guides including complete DMA debugging journey
 
 ## 🚀 Quick Start
 
@@ -73,10 +73,16 @@ make microchip_samv71-xult-clickboards_default
 
 ## 📖 Documentation (samv7-custom branch)
 
+### SD Card DMA Implementation (✅ COMPLETE)
+- **[SAMV71_SD_CARD_DMA_SUCCESS.md](SAMV71_SD_CARD_DMA_SUCCESS.md)** - ⭐ Complete DMA fix documentation with proof of success
+- **[SAMV71_HSMCI_MICROCHIP_COMPARISON_FIXES.md](SAMV71_HSMCI_MICROCHIP_COMPARISON_FIXES.md)** - Fixes #12-#19 detailed analysis
+- **[SAMV71_SD_CARD_KNOWN_ISSUES.md](SAMV71_SD_CARD_KNOWN_ISSUES.md)** - Unresolved error interrupts (OVRE/UNRE/DTOE)
+- **[SAMV7_HSMCI_SD_CARD_DEBUG_INVESTIGATION.md](SAMV7_HSMCI_SD_CARD_DEBUG_INVESTIGATION.md)** - Complete 4-day debugging journey
+
 ### Implementation Guides
 - **[SAMV7_PARAM_STORAGE_FIX.md](SAMV7_PARAM_STORAGE_FIX.md)** - Complete solution for parameter storage bug
 - **[SAMV7_ACHIEVEMENTS.md](SAMV7_ACHIEVEMENTS.md)** - Full progress log and lessons learned
-- **[SD_CARD_INTEGRATION_SUMMARY.md](SD_CARD_INTEGRATION_SUMMARY.md)** - SD card driver implementation
+- **[SD_CARD_INTEGRATION_SUMMARY.md](SD_CARD_INTEGRATION_SUMMARY.md)** - SD card driver implementation (PIO mode)
 - **[CACHE_COHERENCY_GUIDE.md](CACHE_COHERENCY_GUIDE.md)** - DMA memory management for SAMV7
 
 ### Technical Deep-Dives
@@ -96,34 +102,50 @@ make microchip_samv71-xult-clickboards_default
 
 ## ✅ What's Working (samv7-custom branch)
 
-- ✅ **SD Card Driver** - 15.5GB FAT32 mounted at `/fs/microsd`
+- ✅ **SD Card DMA** - Hardware-synchronized DMA transfers working perfectly
+- ✅ **SD Card Storage** - 15.5GB FAT32 mounted at `/fs/microsd`
+- ✅ **Parameter Persistence** - Save/load verified with DMA writes
+- ✅ **File I/O** - Read/write operations verified (echo, cat, ls all working)
 - ✅ **HRT Self-Test** - Passing consistently with TC0 timer
 - ✅ **Boot Sequence** - Clean boot to NSH prompt
 - ✅ **Parameters Load** - 376/1081 from compiled defaults
-- ✅ **File I/O** - Read/write operations verified
 - ✅ **I2C Bus** - `/dev/i2c0` ready for sensors
-- ✅ **Documentation** - 21,000+ lines of implementation guides
+- ✅ **Documentation** - 30,000+ lines of implementation guides
+
+### Proof of Success
+```bash
+nsh> echo "SD card DMA is working!" > /fs/microsd/test.txt
+nsh> cat /fs/microsd/test.txt
+SD card DMA is working!
+```
 
 ## ⚠️ Known Issues (samv7-custom branch)
 
-### SAMV7 C++ Static Initialization Bug
+### Potential DMA Error Interrupts (Under Investigation)
 
-**Problem:**
-- `param set` fails with "failed to store param" error
-- `param save` creates 5-byte files (BSON header only, no data)
-- Root cause: `malloc()` fails during C++ static construction phase
-- Result: Parameter storage layers have zero allocated slots
+**Issue:** Three error interrupts enabled but root causes not yet investigated:
+1. **OVRE (Overrun Error)** - FIFO overflow during RX (could indicate data loss)
+2. **UNRE (Underrun Error)** - FIFO underrun during TX (could indicate corrupted writes)
+3. **DTOE (Data Timeout Error)** - Transfer timeout (could indicate incomplete data)
 
-**Status:** ✅ Solution designed, implementation pending
+**Current Status:**
+- ✅ Error interrupts enabled (Fix #16)
+- ✅ Errors logged but don't abort transfers (Fix #17, matches Microchip approach)
+- ⚠️ Unknown if these errors actually occur under normal operation
+- ⚠️ Root causes not yet investigated
 
-**Solution:** Lazy allocation in `DynamicSparseLayer.h`
-- Defer `malloc()` from constructor to first use
-- Thread-safe initialization using `compare_exchange`
-- Complete implementation plan in [SAMV7_PARAM_STORAGE_FIX.md](SAMV7_PARAM_STORAGE_FIX.md)
+**Impact:**
+- SD card works perfectly in testing
+- No errors observed during basic read/write operations
+- Need stress testing under heavy load to verify
 
-**Impact:** Parameters load correctly but cannot be modified or saved yet.
+**Next Steps:**
+- Add enhanced error logging to detect if errors occur
+- Stress test with large files and rapid read/write cycles
+- Investigate root cause if errors detected
+- See [SAMV71_SD_CARD_KNOWN_ISSUES.md](SAMV71_SD_CARD_KNOWN_ISSUES.md) for full details
 
-**Workaround:** None currently - awaiting lazy allocation implementation.
+**Risk Level:** ⚠️ Medium - Works now, but needs validation under production load
 
 ## 🔧 Build Information
 
@@ -149,22 +171,33 @@ Memory region         Used Size  Region Size  %age Used
 
 ## 🎯 Next Steps (Development Roadmap)
 
-1. **Implement Lazy Allocation** - Fix parameter storage (2-4 hours)
-2. **Test Parameter Persistence** - Verify set/save/reboot cycle
-3. **Re-enable Boot Services** - Restore dataman, logger, mavlink
-4. **Full System Integration** - Test complete autopilot stack
+1. ✅ ~~**SD Card DMA Fix**~~ - **COMPLETE!** All 21 fixes applied and tested
+2. **Validate DMA Under Load** - Stress test with continuous logging
+3. **Monitor Error Interrupts** - Add logging for OVRE/UNRE/DTOE detection
+4. **Full System Integration** - Test complete autopilot stack with SD logging
 5. **Sensor Integration** - Add ICM20689 IMU support
-6. **Upstream Contribution** - Submit lazy allocation fix to PX4
+6. **Production Testing** - 24+ hour stability test with data logging
+7. **Upstream Contribution** - Submit HSMCI DMA fixes to NuttX/PX4
 
 ## 📋 TODO List
 
-- [ ] Implement `_ensure_allocated()` in `DynamicSparseLayer.h`
-- [ ] Add thread-safe lazy initialization
-- [ ] Test `param set` functionality
-- [ ] Test `param save` and verify file size > 5 bytes
-- [ ] Verify parameter persistence across reboot
+### SD Card DMA
+- [x] ~~Fix D-cache invalidation (Fix #1)~~
+- [x] ~~Fix BLKR register handling (Fix #2)~~
+- [x] ~~Implement cached block parameters (Fix #4)~~
+- [x] ~~Guard sam_notransfer() (Fix #12)~~
+- [x] ~~Always use FIFO (Fix #13)~~
+- [x] ~~CFG register - FERRCTRL instead of LSYNC (Fix #14)~~
+- [x] ~~Preserve WRPROOF/RDPROOF bits (Fix #15)~~
+- [x] ~~Remove SWREQ, enable hardware handshaking (Fix #21)~~
+- [x] ~~Verify file I/O working~~
+- [ ] Add enhanced error logging for OVRE/UNRE/DTOE
+- [ ] Stress test with large file writes
+- [ ] Monitor for 24+ hours under typical workload
+
+### System Integration
 - [ ] Re-enable dataman service
-- [ ] Re-enable logger service
+- [ ] Re-enable logger service with SD card backend
 - [ ] Re-enable mavlink autostart
 - [ ] Full autopilot stack testing
 

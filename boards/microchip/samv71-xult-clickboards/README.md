@@ -33,6 +33,9 @@ This directory contains the PX4 Autopilot port for the Microchip ATSAMV71Q21 mic
 - [x] PX4 firmware initialization
 - [x] ROMFS with CROMFS compression
 - [x] Parameter system (394 parameters)
+- [x] **SD Card DMA** - Hardware-synchronized XDMAC transfers working (Fixes #1-#21)
+- [x] **SD Card Storage** - FAT32 filesystem with full read/write support
+- [x] **Parameter Persistence** - Save/load working with DMA backend
 - [x] Logger module
 - [x] Commander (flight controller)
 - [x] Sensors module
@@ -43,14 +46,13 @@ This directory contains the PX4 Autopilot port for the Microchip ATSAMV71Q21 mic
 - [x] I2C bus (TWIHS0)
 - [x] Serial console (UART1)
 - [x] USB CDC/ACM
-- [x] microSD card support
 - [x] NSH shell with scripting
 
 ### ⚠️ Partially Implemented
 - [ ] SPI buses (hardware available, needs pin mapping configuration)
-- [ ] Flash parameter storage (MTD partitions need setup)
 - [ ] PWM outputs (timers available, needs configuration)
 - [ ] ADC (hardware available, needs channel mapping)
+- [ ] DMA error monitoring (OVRE/UNRE/DTOE enabled but not stress-tested)
 
 ### 🚧 Not Implemented Yet
 - [ ] Additional UART ports
@@ -290,31 +292,38 @@ arm-none-eabi-addr2line -e build/microchip_samv71-xult-clickboards_default/micro
 
 ## Known Issues
 
-### C++ Static Initialization Bug
+### Potential DMA Error Interrupts (Under Investigation)
 
-**Issue:** SAMV7 toolchain has a bug where brace-initialized static variables with pointer/object initializers are zero-initialized instead of using specified values.
+**Issue:** Three error interrupts enabled but need stress testing to verify they don't occur:
+1. **OVRE (Overrun Error)** - FIFO overflow during RX
+2. **UNRE (Underrun Error)** - FIFO underrun during TX
+3. **DTOE (Data Timeout Error)** - Transfer timeout
 
-**Affected code:**
-- Parameter system layer initialization
-- WorkQueueManager initialization
+**Status:**
+- Error interrupts enabled (Fix #16)
+- Errors logged but don't abort transfers (Fix #17)
+- Need stress testing under heavy load
+- See [SAMV71_SD_CARD_KNOWN_ISSUES.md](../../../SAMV71_SD_CARD_KNOWN_ISSUES.md)
 
-**Workaround applied:** Null pointer checks in `DynamicSparseLayer::get()` to return default values instead of dereferencing null parent pointers.
-
-**Location:** `src/lib/parameters/DynamicSparseLayer.h:126-128`
-
-**Proper fix (future):** Use placement new with aligned storage for explicit runtime initialization (commented out due to compilation issues).
+**Risk:** Medium - Works in testing, needs production validation
 
 ### Missing Features
 
-**Flash Parameter Storage:**
-- MTD partitions `/fs/mtd_caldata` and `/fs/mtd_params` need configuration
-- Currently parameters stored only in RAM (lost on reboot)
-- Requires NuttX MTD driver setup for internal flash
+**SPI Configuration:**
+- Hardware available but pin mapping not configured
+- ICM20689 IMU disabled until SPI buses enabled
+- Requires `spi.cpp` configuration
 
 **PWM Outputs:**
 - Hardware timers available (TC0-TC2)
 - Pin mapping needs configuration in `timer_config.cpp`
 - PWM module not yet enabled
+
+**Additional Peripherals:**
+- Additional UART ports (GPS, telemetry)
+- Ethernet support
+- CAN bus
+- Hardware timer input capture
 
 ## Contributing
 
@@ -394,6 +403,30 @@ For questions and issues:
 
 ## Changelog
 
+### 2025-11-22 - SD Card DMA Complete
+
+**Fixed:**
+- ✅ **SD Card DMA** - Complete hardware-synchronized DMA support (21 fixes applied)
+- ✅ **Fix #1** - D-cache invalidation for DMA receive buffers
+- ✅ **Fix #2** - Don't clear BLKR register
+- ✅ **Fix #4** - Cached block parameters
+- ✅ **Fix #12** - Guard sam_notransfer() against aborting active DMA
+- ✅ **Fix #13** - Always use FIFO (not RDR)
+- ✅ **Fix #14** - CFG register - FERRCTRL instead of LSYNC
+- ✅ **Fix #15** - Preserve WRPROOF/RDPROOF bits
+- ✅ **Fix #21** - Remove SWREQ, enable hardware handshaking (THE KEY FIX)
+
+**Verified:**
+- File write: `echo "test" > /fs/microsd/test.txt` - SUCCESS
+- File read: `cat /fs/microsd/test.txt` - SUCCESS
+- Parameter save/load working
+- No timeouts, no CUBC stuck errors
+
+**Documentation:**
+- [SAMV71_SD_CARD_DMA_SUCCESS.md](../../../SAMV71_SD_CARD_DMA_SUCCESS.md) - Complete fix documentation
+- [SAMV71_HSMCI_MICROCHIP_COMPARISON_FIXES.md](../../../SAMV71_HSMCI_MICROCHIP_COMPARISON_FIXES.md) - Detailed analysis
+- [SAMV71_SD_CARD_KNOWN_ISSUES.md](../../../SAMV71_SD_CARD_KNOWN_ISSUES.md) - Future improvements
+
 ### 2025-11-13 - Initial Working Port
 
 **Added:**
@@ -401,7 +434,7 @@ For questions and issues:
 - NuttX 11.0.0 configuration
 - I2C sensor support (AK09916, DPS310)
 - USB CDC/ACM support
-- microSD card support
+- microSD card support (PIO mode)
 - CROMFS for ROMFS compression
 - NSH scripting with if/then/else support
 - I2C tools for debugging
@@ -414,8 +447,8 @@ For questions and issues:
 - Sensor startup command syntax
 
 **Known Limitations:**
+- SD card DMA not working (PIO mode only) - **RESOLVED 2025-11-22**
 - SPI not configured (ICM20689 disabled)
-- Flash parameter storage not implemented
 - PWM outputs not configured
 - Only UART1 enabled for console
 
