@@ -47,8 +47,8 @@ set PARAM_DEFAULTS_VER 1
 #
 ver all
 
-# TEMPORARILY DISABLED: Stop all mavlink instances EARLY for SD card debugging (console buffer bug causes hangs on warnings)
-mavlink stop-all >/dev/null 2>&1
+# RE-ENABLED: MAVLink now works with USB CDC/ACM
+# mavlink stop-all >/dev/null 2>&1
 
 #
 # Try to mount the microSD card.
@@ -511,23 +511,23 @@ else
 	#
 	. ${R}etc/init.d/rc.serial
 
-	# TEMPORARILY DISABLED: Stop mavlink instances started by rc.serial (console buffer bug causes hangs on warnings)
-	mavlink stop-all >/dev/null 2>&1
+	# RE-ENABLED: MAVLink now works with USB CDC/ACM
+	# mavlink stop-all >/dev/null 2>&1
 
 	# Must be started after the serial config is read
 	rc_input start $RC_INPUT_ARGS
 
 	# Manages USB interface
-	# TEMPORARILY DISABLED - mavlink mission handler calls dataman_client which hangs
-	# if param greater -s SYS_USB_AUTO -1
-	# then
-	# 	if ! cdcacm_autostart start
-	# 	then
-	# 		sercon
-	# 		echo "Starting MAVLink on /dev/ttyACM0"
-	# 		mavlink start -d /dev/ttyACM0
-	# 	fi
-	# fi
+	# RE-ENABLED: USB CDC/ACM now configured properly
+	if param greater -s SYS_USB_AUTO -1
+	then
+		if ! cdcacm_autostart start
+		then
+			sercon
+			echo "Starting MAVLink on /dev/ttyACM0"
+			mavlink start -d /dev/ttyACM0
+		fi
+	fi
 
 	#
 	# Play the startup tune (if not disabled or there is an error)
@@ -685,5 +685,5 @@ unset VEHICLE_TYPE
 
 #
 # Boot is complete, inform MAVLink app(s) that the system is now fully up and running.
-# TEMPORARILY DISABLED - no mavlink instances running during SD debug
-# mavlink boot_complete
+# RE-ENABLED: MAVLink now running for USB CDC/ACM
+mavlink boot_complete

@@ -7,7 +7,7 @@ CONFIG_BOARD_CONSTRAINED_FLASH=y
 CONFIG_BOARD_NO_HELP=y
 CONFIG_BOARD_EXTERNAL_METADATA=y
 CONFIG_BOARD_SERIAL_GPS1="/dev/ttyS2"
-CONFIG_BOARD_SERIAL_TEL1="/dev/ttyS0"
+CONFIG_BOARD_SERIAL_TEL1="/dev/ttyACM0"
 CONFIG_BOARD_SERIAL_TEL2="/dev/ttyS1"
 CONFIG_BOARD_SERIAL_RC="/dev/ttyS4"
 
@@ -15,7 +15,7 @@ CONFIG_BOARD_SERIAL_RC="/dev/ttyS4"
 # CONFIG_DRIVERS_ADC_BOARD_ADC is not set
 
 # USB CDC/ACM
-# CONFIG_DRIVERS_CDCACM_AUTOSTART is not set  # TEMPORARILY DISABLED - auto-starts mavlink which calls dataman_client
+CONFIG_DRIVERS_CDCACM_AUTOSTART=y  # RE-ENABLED - dataman_client issue resolved
 
 # ESC/Motor Outputs - Disabled (requires timer/DShot implementation)
 # CONFIG_DRIVERS_DSHOT is not set
