@@ -42,10 +42,11 @@ Fully working implementation with critical bug fixes and comprehensive documenta
 - SRAM: 27 KB / 384 KB (6.90%)
 - Parameter set/save/persistence: Working
 - SD card I/O: Working
-- USB CDC/ACM MAVLink: Working (manual startup)
+- USB CDC/ACM MAVLink: ✅ **Verified** (MAVProxy tested, 13k+ packets, 0 errors)
 - HRT self-test: Passing
 - Debugging tools: dmesg, hrt_test enabled
-- QGroundControl: Compatible
+- MAVLink telemetry: Bidirectional, high-speed (480 Mbps USB)
+- QGroundControl: Compatible (pending full integration test)
 
 **📚 Complete Documentation Suite (30+ documents):**
 - **[DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md)** - Central navigation hub for all documentation
@@ -53,6 +54,7 @@ Fully working implementation with critical bug fixes and comprehensive documenta
 - **[README_SAMV7.md](README_SAMV7.md)** - Branch overview and quick start guide
 - **[SAMV7_PARAM_STORAGE_FIX.md](SAMV7_PARAM_STORAGE_FIX.md)** - Critical parameter storage fix details
 - **[SAMV71_USB_CDC_IMPLEMENTATION.md](SAMV71_USB_CDC_IMPLEMENTATION.md)** - USB CDC/ACM MAVLink implementation guide
+- **[SAMV71_FEATURE_RE_ENABLEMENT_ROADMAP.md](SAMV71_FEATURE_RE_ENABLEMENT_ROADMAP.md)** - Incremental service re-enablement plan
 - **[KNOWN_GOOD_SAFE_MODE_CONFIG.md](KNOWN_GOOD_SAFE_MODE_CONFIG.md)** - Reference baseline configuration
 
 ### Hardware Configuration
