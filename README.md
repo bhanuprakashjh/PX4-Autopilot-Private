@@ -32,29 +32,34 @@ Fully working implementation with critical bug fixes and comprehensive documenta
 **✅ Major Fixes Implemented:**
 - **Parameter Storage Fix** - Manual construction pattern fixes C++ static initialization bug
 - **SD Card Integration** - Complete FAT32 support with parameter persistence
+- **USB CDC/ACM Implementation** - High-speed USB MAVLink telemetry on TARGET USB port
 - **HRT Implementation** - Reliable TC0 timer configuration
-- **DMA Cache Coherency** - Proper memory management for SDIO
+- **DMA Cache Coherency** - Proper memory management for SDIO and USB
 - **Safe Mode Configuration** - Stable baseline for incremental development
 
-**✅ Current Status (November 2025):**
-- Flash: 920 KB / 2 MB (43.91%)
-- SRAM: 18 KB / 384 KB (4.75%)
+**✅ Current Status (November 23, 2025):**
+- Flash: 1020 KB / 2 MB (48.61%)
+- SRAM: 27 KB / 384 KB (6.90%)
 - Parameter set/save/persistence: Working
 - SD card I/O: Working
+- USB CDC/ACM MAVLink: Working (manual startup)
 - HRT self-test: Passing
 - Debugging tools: dmesg, hrt_test enabled
+- QGroundControl: Compatible
 
 **📚 Complete Documentation Suite (30+ documents):**
 - **[DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md)** - Central navigation hub for all documentation
 - **[CURRENT_STATUS.md](CURRENT_STATUS.md)** - Latest system state, features, and issues
 - **[README_SAMV7.md](README_SAMV7.md)** - Branch overview and quick start guide
 - **[SAMV7_PARAM_STORAGE_FIX.md](SAMV7_PARAM_STORAGE_FIX.md)** - Critical parameter storage fix details
+- **[SAMV71_USB_CDC_IMPLEMENTATION.md](SAMV71_USB_CDC_IMPLEMENTATION.md)** - USB CDC/ACM MAVLink implementation guide
 - **[KNOWN_GOOD_SAFE_MODE_CONFIG.md](KNOWN_GOOD_SAFE_MODE_CONFIG.md)** - Reference baseline configuration
 
 ### Hardware Configuration
 - **MCU:** ATSAM V71Q21 (ARM Cortex-M7 @ 300MHz)
 - **Flash:** 2MB
 - **SRAM:** 384KB
+- **USB:** High-speed CDC/ACM (480 Mbps) for MAVLink telemetry
 - **SD Card:** FAT32 support (tested with 16GB)
 - **Sensors:** I2C bus ready for ICM20689 IMU, magnetometer, barometer
 
