@@ -20,50 +20,60 @@ This repository includes **custom PX4 implementations** for the **Microchip ATSA
 
 This repository maintains two branches for SAMV71-XULT development:
 
-#### **`main`** - Original/Baseline Implementation (You are here)
+#### **`main`** - Original/Baseline Implementation
 Standard PX4 baseline for SAMV71 with basic hardware support.
 - **Status:** Reference implementation
 - **Use Case:** Starting point, comparison baseline
 - **Documentation:** [boards/microchip/samv71-xult-clickboards/PORTING_NOTES.md](boards/microchip/samv71-xult-clickboards/PORTING_NOTES.md)
 
-#### **`samv7-custom`** - Enhanced Implementation ⭐ **Recommended for Development**
+#### **`samv7-custom`** - Enhanced Implementation ⭐ **Recommended**
 Fully working implementation with critical bug fixes and comprehensive documentation.
 
 **✅ Major Fixes Implemented:**
 - **Parameter Storage Fix** - Manual construction pattern fixes C++ static initialization bug
 - **SD Card Integration** - Complete FAT32 support with parameter persistence
+- **USB CDC/ACM Implementation** - High-speed USB MAVLink telemetry on TARGET USB port
 - **HRT Implementation** - Reliable TC0 timer configuration
-- **DMA Cache Coherency** - Proper memory management for SDIO
+- **DMA Cache Coherency** - Proper memory management for SDIO and USB
 - **Safe Mode Configuration** - Stable baseline for incremental development
 
-**✅ Current Status (November 2025):**
-- Flash: 920 KB / 2 MB (43.91%)
-- SRAM: 18 KB / 384 KB (4.75%)
+**✅ Current Status (November 23, 2025):**
+- Flash: 1020 KB / 2 MB (48.61%)
+- SRAM: 27 KB / 384 KB (6.90%)
 - Parameter set/save/persistence: Working
 - SD card I/O: Working
+- USB CDC/ACM MAVLink: ✅ **Verified** (MAVProxy tested, 13k+ packets, 0 errors)
 - HRT self-test: Passing
 - Debugging tools: dmesg, hrt_test enabled
+- MAVLink telemetry: Bidirectional, high-speed (480 Mbps USB)
+- QGroundControl: Compatible (pending full integration test)
 
 **📚 Complete Documentation Suite (30+ documents):**
+- **[DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md)** - Central navigation hub for all documentation
+- **[CURRENT_STATUS.md](CURRENT_STATUS.md)** - Latest system state, features, and issues
+- **[README_SAMV7.md](README_SAMV7.md)** - Branch overview and quick start guide
+- **[SAMV7_PARAM_STORAGE_FIX.md](SAMV7_PARAM_STORAGE_FIX.md)** - Critical parameter storage fix details
+- **[SAMV71_USB_CDC_IMPLEMENTATION.md](SAMV71_USB_CDC_IMPLEMENTATION.md)** - USB CDC/ACM MAVLink implementation guide
+- **[SAMV71_FEATURE_RE_ENABLEMENT_ROADMAP.md](SAMV71_FEATURE_RE_ENABLEMENT_ROADMAP.md)** - Incremental service re-enablement plan
+- **[KNOWN_GOOD_SAFE_MODE_CONFIG.md](KNOWN_GOOD_SAFE_MODE_CONFIG.md)** - Reference baseline configuration
 
-Navigate all documentation starting from these entry points:
-- **[DOCUMENTATION_INDEX.md](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/blob/samv7-custom/DOCUMENTATION_INDEX.md)** - Central navigation hub
-- **[CURRENT_STATUS.md](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/blob/samv7-custom/CURRENT_STATUS.md)** - Latest system state
-- **[README_SAMV7.md](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/blob/samv7-custom/README_SAMV7.md)** - Branch overview
-- **[SAMV7_PARAM_STORAGE_FIX.md](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/blob/samv7-custom/SAMV7_PARAM_STORAGE_FIX.md)** - Critical fixes
-- **[KNOWN_GOOD_SAFE_MODE_CONFIG.md](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/blob/samv7-custom/KNOWN_GOOD_SAFE_MODE_CONFIG.md)** - Reference config
+### Hardware Configuration
+- **MCU:** ATSAM V71Q21 (ARM Cortex-M7 @ 300MHz)
+- **Flash:** 2MB
+- **SRAM:** 384KB
+- **USB:** High-speed CDC/ACM (480 Mbps) for MAVLink telemetry
+- **SD Card:** FAT32 support (tested with 16GB)
+- **Sensors:** I2C bus ready for ICM20689 IMU, magnetometer, barometer
 
-### 🚀 Quick Start - Switch to Enhanced Branch
-
-**⚠️ Note:** For active development, use the `samv7-custom` branch which has all fixes and documentation.
+### 🚀 Quick Start (samv7-custom branch)
 
 ```bash
-# Clone repository
-git clone https://github.com/bhanuprakashjh/PX4-Autopilot-Private.git
+# Clone and checkout enhanced branch
+git clone https://github.com/YOUR_USERNAME/PX4-Autopilot-Private.git
 cd PX4-Autopilot-Private
-
-# Switch to enhanced branch (recommended)
 git checkout samv7-custom
+
+# Update submodules
 git submodule update --init --recursive
 
 # Build firmware
@@ -74,24 +84,44 @@ openocd -f interface/cmsis-dap.cfg -f target/atsamv.cfg \
   -c "program build/microchip_samv71-xult-clickboards_default/microchip_samv71-xult-clickboards_default.elf verify reset exit"
 ```
 
-### Hardware Configuration
-- **MCU:** ATSAM V71Q21 (ARM Cortex-M7 @ 300MHz)
-- **Flash:** 2MB
-- **SRAM:** 384KB
-- **SD Card:** FAT32 support (tested with 16GB)
-- **Sensors:** I2C bus ready for ICM20689 IMU, magnetometer, barometer
+### 📖 Documentation Quick Links
 
-### 🎯 Recommended: Use samv7-custom Branch
+**For New Users:**
+1. Start with **[README_SAMV7.md](README_SAMV7.md)** for branch overview
+2. Check **[CURRENT_STATUS.md](CURRENT_STATUS.md)** for latest features/issues
+3. Use **[DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md)** to navigate all docs
 
-The **samv7-custom** branch contains:
-- ✅ All critical bug fixes
-- ✅ Working parameter storage
-- ✅ SD card integration
-- ✅ Comprehensive documentation (30+ files)
-- ✅ Debugging tools enabled
-- ✅ Known-good baseline configuration
+**For Developers:**
+- **[SAMV7_PARAM_STORAGE_FIX.md](SAMV7_PARAM_STORAGE_FIX.md)** - Understanding the critical fix
+- **[SAMV7_ACHIEVEMENTS.md](SAMV7_ACHIEVEMENTS.md)** - Complete development journey
+- **[DOCS_DMESG_HRT_ENABLE.md](DOCS_DMESG_HRT_ENABLE.md)** - Debugging tools setup
 
-**View the enhanced branch:** [Switch to samv7-custom](https://github.com/bhanuprakashjh/PX4-Autopilot-Private/tree/samv7-custom)
+**Technical Deep Dives:**
+- **[SD_CARD_INTEGRATION_SUMMARY.md](SD_CARD_INTEGRATION_SUMMARY.md)** - SD card implementation
+- **[HRT_IMPLEMENTATION_SUMMARY.md](HRT_IMPLEMENTATION_SUMMARY.md)** - Timer implementation
+- **[CACHE_COHERENCY_GUIDE.md](CACHE_COHERENCY_GUIDE.md)** - DMA memory management
+
+### 🎯 Recommended Workflow
+
+1. **Use `samv7-custom` branch** for active development
+2. **Reference `main` branch** only for comparison with upstream
+3. **Start with safe-mode** configuration for testing
+4. **Follow incremental approach** for enabling services
+5. **Check documentation** before making changes
+
+### 🔧 Switching Between Branches
+
+```bash
+# Switch to enhanced version
+git checkout samv7-custom
+git submodule update --init --recursive
+make clean && make microchip_samv71-xult-clickboards_default
+
+# Switch to original (for reference)
+git checkout main
+git submodule update --init --recursive
+make clean && make microchip_samv71-xult-clickboards_default
+```
 
 ---
 
