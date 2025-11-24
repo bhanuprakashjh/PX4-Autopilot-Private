@@ -3,4 +3,5 @@
 # MAVLink enabled on USB CDC/ACM (ttyACM0)
 param set-default SYS_AUTOSTART 0
 param set-default MAV_0_CONFIG 101
+param set-default MAV_0_RATE 57600
 param set-default SDLOG_MODE -1
