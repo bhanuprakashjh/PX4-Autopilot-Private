@@ -2452,7 +2452,9 @@ Mavlink::task_main(int argc, char *argv[])
 			}
 		}
 
+#ifndef CONSTRAINED_FLASH
 		_events.update(t);
+#endif
 
 		/* pass messages from other instances */
 		if (get_forwarding_on()) {

@@ -252,19 +252,13 @@ static_assert(41 == ROTATION_MAX, "Keep MAV_SENSOR_ROTATION and PX4 Rotation in 
 static_assert(MAV_SENSOR_ROTATION_CUSTOM == static_cast<MAV_SENSOR_ORIENTATION>(ROTATION_CUSTOM), "Custom Rotation");
 
 
-static const StreamListItem streams_list[] = {
-#if defined(HEARTBEAT_HPP)
+static constexpr StreamListItem streams_list[] = {
+	// Essential MAVLink streams - always required for ground station communication
+	// These are unconditional to work with CONSTRAINED_FLASH boards
 	create_stream_list_item<MavlinkStreamHeartbeat>(),
-#endif // HEARTBEAT_HPP
-#if defined(STATUSTEXT_HPP)
 	create_stream_list_item<MavlinkStreamStatustext>(),
-#endif // STATUSTEXT_HPP
-#if defined(COMMAND_LONG_HPP)
 	create_stream_list_item<MavlinkStreamCommandLong>(),
-#endif // COMMAND_LONG_HPP
-#if defined(SYS_STATUS_HPP)
 	create_stream_list_item<MavlinkStreamSysStatus>(),
-#endif // SYS_STATUS_HPP
 	create_stream_list_item<MavlinkStreamBatteryStatus>(),
 #if defined(BATTERY_INFO_HPP)
 	create_stream_list_item<MavlinkStreamBatteryInfo>(),
