@@ -15,3 +15,9 @@ param set-default CBRK_SUPPLY_CHK 894281
 param set-default COM_ARM_WO_GPS 1
 param set-default SYS_HAS_MAG 0
 param set-default SYS_HAS_BARO 0
+
+# Circuit breaker for flight termination (required for HITL)
+param set-default CBRK_FLIGHTTERM 121212
+
+# Increase parameter stream rate for better QGC sync
+param set-default MAV_PARAM_RATE 100

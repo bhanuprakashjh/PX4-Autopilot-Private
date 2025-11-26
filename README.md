@@ -16,6 +16,44 @@ PX4 is highly portable, OS-independent and supports Linux, NuttX and MacOS out o
 
 This repository includes **custom PX4 implementations** for the **Microchip ATSAMV71-XULT development board** with comprehensive fixes and documentation.
 
+---
+
+## 🚀 Microchip PX4 Platform Roadmap
+
+**Vision:** Build the most advanced, secure, and capable flight controller platform on Microchip silicon.
+
+```
+PHASE 1 (NOW)      PHASE 2           PHASE 3           PHASE 4
+SAMV71             PIC32CZ CA70      PIC32CZ CA80      CA90 + HSM
+┌──────────┐      ┌──────────┐      ┌──────────┐      ┌──────────┐
+│ 300 MHz  │ ───▶ │ 300 MHz  │ ───▶ │ 300 MHz  │ ───▶ │ 300 MHz  │
+│ 384KB RAM│      │ 512KB RAM│      │ 1MB + TCM│      │ 1MB + HSM│
+│ 2MB Flash│      │ 60% Cost↓│      │ 8MB Flash│      │ Secure   │
+│ AEC-Q100 │      │ Pin Compat│      │ Gigabit  │      │ Boot     │
+└──────────┘      └──────────┘      └──────────┘      └──────────┘
+```
+
+### 📋 Strategic Documents
+
+| Document | Description |
+|----------|-------------|
+| **[MICROCHIP_PX4_ROADMAP.md](MICROCHIP_PX4_ROADMAP.md)** | Complete 4-phase development plan with timelines |
+| **[SAMV71_HARDWARE_ADVANTAGES.md](SAMV71_HARDWARE_ADVANTAGES.md)** | SAMV71 vs STM32H753II (FMU-v6X) comparison |
+| **[PIC32CZ_CA80_ANALYSIS.md](PIC32CZ_CA80_ANALYSIS.md)** | Next-gen PIC32CZ CA80/CA90 analysis |
+| **[SAMV71_TIER1_BATTLE_PLAN.md](SAMV71_TIER1_BATTLE_PLAN.md)** | Phase 1 implementation checklist |
+
+### 🏆 Why Microchip Wins
+
+| Capability | Our Platform | Pixhawk (STM32) |
+|------------|--------------|-----------------|
+| **Flash** | 8 MB (CA80) | 2 MB max |
+| **Security** | HSM (CA90) | None |
+| **Ethernet** | Gigabit | 10/100 |
+| **Real-time** | 256KB TCM | No TCM |
+| **Supply** | Industrial | Shortage-prone |
+
+---
+
 ### 🌿 Branch Structure
 
 This repository maintains two branches for SAMV71-XULT development:
