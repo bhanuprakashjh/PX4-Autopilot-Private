@@ -69,6 +69,11 @@
 
 #include <px4_arch/io_timer.h>
 #include <drivers/drv_hrt.h>
+
+/* PCK6 configuration for 1 MHz HRT clock */
+#include "sam_pck.h"
+#include "hardware/sam_matrix.h"
+#include "hardware/sam_pmc.h"
 #include <drivers/drv_board_led.h>
 #include <systemlib/px4_macros.h>
 #include <px4_platform_common/init.h>
@@ -163,6 +168,49 @@ __EXPORT void board_on_reset(int status)
 }
 
 /************************************************************************************
+ * HRT PCK6 configuration (shared with hrt.c via weak symbol)
+ ************************************************************************************/
+volatile bool g_samv7_hrt_pck6_configured = false;
+
+static void configure_hrt_pck6(void)
+{
+	uint32_t actual_freq;
+	uint32_t regval;
+	int timeout = 100000;
+
+	g_samv7_hrt_pck6_configured = false;
+
+	actual_freq = sam_pck_configure(PCK6, PCKSRC_MCK, 1000000);
+
+	if (actual_freq != 1000000) {
+		syslog(LOG_ERR, "[hrt] PCK6 configure failed (%lu Hz)\n",
+		       (unsigned long)actual_freq);
+		return;
+	}
+
+	sam_pck_enable(PCK6, true);
+
+	while ((getreg32(SAM_PMC_SR) & PMC_INT_PCKRDY6) == 0) {
+		if (--timeout <= 0) {
+			syslog(LOG_ERR, "[hrt] PCK6 ready timeout\n");
+			sam_pck_enable(PCK6, false);
+			return;
+		}
+	}
+
+	/* Disable MATRIX write protection (if previously enabled) */
+	putreg32(MATRIX_WPMR_WPKEY, SAM_MATRIX_WPMR);
+
+	/* Route TC0 clock to PCK6 (TC0CC = 0) */
+	regval = getreg32(SAM_MATRIX_CCFG_PCCR);
+	regval &= ~MATRIX_CCFG_PCCR_TC0CC;
+	putreg32(regval, SAM_MATRIX_CCFG_PCCR);
+
+	g_samv7_hrt_pck6_configured = true;
+	syslog(LOG_INFO, "[hrt] PCK6 configured for 1 MHz TC0 clock\n");
+}
+
+/************************************************************************************
  * Name: sam_boardinitialize
  *
  * Description:
@@ -176,6 +224,9 @@ __EXPORT void
 sam_boardinitialize(void)
 {
 	board_on_reset(-1); /* Reset PWM first thing */
+
+	/* Configure HRT clock before any timer users come up */
+	configure_hrt_pck6();
 
 	/* configure LEDs */
 	board_autoled_initialize();

@@ -91,5 +91,6 @@ int HRTTest::main()
 	hrt_cancel(&t1);
 	PX4_INFO("HRT_CALL + %d\n", hrt_called(&t1));
 
+	appState.setRunning(false);
 	return 0;
 }

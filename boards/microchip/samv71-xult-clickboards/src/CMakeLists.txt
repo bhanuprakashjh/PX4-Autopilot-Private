@@ -42,6 +42,14 @@ add_library(drivers_board
 	usb.c
 )
 
+# PCK6 timer test command
+px4_add_module(
+	MODULE board_pck6_test
+	MAIN pck6_test
+	SRCS
+		pck6_timer_test.c
+)
+
 target_link_libraries(drivers_board
 	PRIVATE
 		arch_io_pins

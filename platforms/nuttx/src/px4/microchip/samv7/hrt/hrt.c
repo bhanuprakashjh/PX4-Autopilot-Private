@@ -54,6 +54,8 @@
 #include "hardware/sam_pmc.h"
 #include "hardware/sam_tc.h"
 
+extern volatile bool g_samv7_hrt_pck6_configured __attribute__((weak));
+
 
 #ifdef CONFIG_DEBUG_HRT
 #  define hrtinfo _info
@@ -71,8 +73,20 @@
 #  error HRT_TIMER must be 0 for SAMV71 TC0
 #endif
 
-#define HRT_TIMER_DIVISOR     32
-#define HRT_TIMER_FREQ        (HRT_TIMER_CLOCK / HRT_TIMER_DIVISOR)
+/*
+ * Timer clock sources:
+ *  - Preferred: PCK6 configured to 1 MHz (set up in board init)
+ *  - Fallback:  MCK/32 = 150 MHz / 32 = 4,687,500 Hz
+ *
+ * SAMV7 TC channels are 16-bit—there is no hardware “chain to 32-bit” mode—so
+ * we extend the time base in software. As long as the compare interrupt fires
+ * at least once every ~65 ms (HRT_INTERVAL_MAX), wraps are tracked correctly.
+ * Longer stalls would require a more complex software chain (e.g. another TC
+ * channel or DMA logging) or a device with native 32-bit timers (PIC32CZ TCC).
+ */
+#define HRT_TIMER_DIVISOR        32
+#define HRT_TIMER_FREQ_FALLBACK  (HRT_TIMER_CLOCK / HRT_TIMER_DIVISOR)
+#define HRT_TIMER_FREQ_PCK6      1000000UL
 
 /**
 * Minimum/maximum deadlines.
@@ -84,10 +98,10 @@
 #define HRT_INTERVAL_MAX	50000
 
 /*
-* Period of the free-running counter, in timer ticks.
+* Period of the free-running counter, in timer ticks (TC channel is 16-bit).
 */
-#define HRT_COUNTER_PERIOD	UINT32_MAX
-#define HRT_COUNTER_PERIOD_TICKS (UINT64_C(1) << 32)
+#define HRT_COUNTER_PERIOD	0xFFFF
+#define HRT_COUNTER_PERIOD_TICKS 65536ULL
 
 /*
  * Scaling helpers between timer ticks and microseconds.
@@ -106,6 +120,9 @@
  * This gives ~10x speedup on Cortex-M7 which lacks 64-bit hardware divide.
  */
 
+static bool     hrt_use_pck6 = false;
+static uint32_t hrt_timer_freq = HRT_TIMER_FREQ_FALLBACK;
+
 /* Magic constant for division by 75: ceil(2^35 / 75) = 458129845 = 0x1B4E81B5 */
 #define DIV_BY_75_MAGIC    0x1B4E81B5ULL
 #define DIV_BY_75_SHIFT    35
@@ -121,15 +138,19 @@ static inline uint64_t fast_div_by_75(uint64_t x)
 
 static inline uint64_t hrt_ticks_to_usec(uint64_t ticks)
 {
-	/* ticks * 1000000 / 4687500 = ticks * 16 / 75 */
+	if (hrt_use_pck6) {
+		return ticks;
+	}
+
 	return fast_div_by_75(ticks << 4);
 }
 
 static inline uint64_t hrt_usec_to_ticks(hrt_abstime usec)
 {
-	/* usec * 4687500 / 1000000 = usec * 75 / 16
-	 * Add 15 before shift for rounding up (ensures we don't miss deadlines)
-	 */
+	if (hrt_use_pck6) {
+		return usec;
+	}
+
 	return ((usec * 75ULL) + 15ULL) >> 4;
 }
 
@@ -187,7 +208,7 @@ static void hrt_call_invoke(void);
 
 static uint64_t hrt_ticks_locked(uint32_t *count_out)
 {
-	uint32_t count = getreg32(rCV);
+	uint32_t count = getreg32(rCV) & 0xFFFF;
 
 	if (count < hrt_last_counter_value) {
 		hrt_absolute_time_base += HRT_COUNTER_PERIOD_TICKS;
@@ -218,8 +239,8 @@ static bool hrt_run_selftest(void)
 	hrt_selftest_expected = true;
 	hrt_selftest_done = false;
 
-	uint32_t current = getreg32(rCV);
-	uint32_t ra = current + selftest_ticks;
+	uint32_t current = getreg32(rCV) & 0xFFFF;
+	uint32_t ra = (current + selftest_ticks) & 0xFFFF;
 	latency_baseline = ra;
 
 	putreg32(ra, rRA);
@@ -248,8 +269,25 @@ static bool hrt_run_selftest(void)
 /**
  * Initialize the timer we are going to use.
  */
+
 static void hrt_tim_init(void)
 {
+	uint32_t tcclks;
+
+	if (&g_samv7_hrt_pck6_configured != NULL && g_samv7_hrt_pck6_configured) {
+		hrt_use_pck6 = true;
+		hrt_timer_freq = HRT_TIMER_FREQ_PCK6;
+		tcclks = TC_CMR_TCCLKS_PCK6;
+		syslog(LOG_INFO, "[hrt] TC0 clocked from PCK6 @ 1 MHz\n");
+
+	} else {
+		hrt_use_pck6 = false;
+		hrt_timer_freq = HRT_TIMER_FREQ_FALLBACK;
+		tcclks = TC_CMR_TCCLKS_MCK32;
+		syslog(LOG_INFO, "[hrt] TC0 clocked from MCK/32 @ %lu Hz\n",
+		       (unsigned long)hrt_timer_freq);
+	}
+
 	/* Enable the TC peripheral clock */
 	uint32_t regval = getreg32(SAM_PMC_PCER0);
 	regval |= HRT_TIMER_PCER;
@@ -258,13 +296,13 @@ static void hrt_tim_init(void)
 	/* Disable TC while we configure it */
 	putreg32(TC_CCR_CLKDIS, rCCR);
 
-	/* Waveform mode, reset on RC compare, clocked from MCK/32 */
-	uint32_t cmr = TC_CMR_WAVE | TC_CMR_WAVSEL_UP | TC_CMR_TCCLKS_MCK32;
+	/* Waveform mode, reset on RC compare, selected clock */
+	uint32_t cmr = TC_CMR_WAVE | TC_CMR_WAVSEL_UP | tcclks;
 	putreg32(cmr, rCMR);
 
-	/* Set initial compare registers */
-	putreg32(0xFFFFFFFF, rRC);
-	putreg32(0xFFFFFFFF, rRA);
+	/* Set initial compare registers for 16-bit operation */
+	putreg32(0xFFFF, rRC);
+	putreg32(0xFFFF, rRA);
 
 	/* Disable/clear interrupts */
 	putreg32(0xFFFFFFFF, rIDR);
@@ -280,7 +318,7 @@ static void hrt_tim_init(void)
 	/* Enable interrupts at the NVIC */
 	up_enable_irq(HRT_TIMER_VECTOR);
 
-	hrt_last_counter_value = getreg32(rCV);
+	hrt_last_counter_value = getreg32(rCV) & 0xFFFF;
 	hrt_selftest_expected = false;
 	hrt_selftest_done = false;
 
@@ -307,7 +345,7 @@ hrt_tim_isr(int irq, void *context, void *arg)
 	}
 
 	if (status & TC_INT_CPAS) {
-		latency_actual = getreg32(rCV);
+		latency_actual = getreg32(rCV) & 0xFFFF;
 		putreg32(TC_INT_CPAS, rIDR);
 
 		if (hrt_selftest_expected) {
@@ -575,7 +613,11 @@ hrt_call_reschedule()
 		delta_ticks = 1;
 	}
 
-	uint32_t ra = current_count + (uint32_t)delta_ticks;
+	if (delta_ticks > 0xFFFE) {
+		delta_ticks = 0xFFFE;
+	}
+
+	uint32_t ra = (current_count + (uint32_t)delta_ticks) & 0xFFFF;
 	latency_baseline = ra;
 
 	putreg32(ra, rRA);
@@ -587,7 +629,8 @@ hrt_call_reschedule()
 static void
 hrt_latency_update(void)
 {
-	uint32_t latency = latency_actual - latency_baseline;
+	uint32_t latency_ticks = (latency_actual - latency_baseline) & 0xFFFF;
+	uint32_t latency = (uint32_t)hrt_ticks_to_usec(latency_ticks);
 	unsigned	index;
 
 	/* bounded buckets */
