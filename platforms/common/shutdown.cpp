@@ -61,43 +61,69 @@
 
 using namespace time_literals;
 
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+static pthread_mutex_t shutdown_mutex{};
+static pthread_once_t shutdown_mutex_once = PTHREAD_ONCE_INIT;
+
+static void shutdown_mutex_init()
+{
+	if (pthread_mutex_init(&shutdown_mutex, nullptr) != 0) {
+		abort();
+	}
+}
+
+static inline void shutdown_mutex_lock()
+{
+	pthread_once(&shutdown_mutex_once, shutdown_mutex_init);
+	pthread_mutex_lock(&shutdown_mutex);
+}
+
+static inline void shutdown_mutex_unlock()
+{
+	pthread_mutex_unlock(&shutdown_mutex);
+}
+#else
 static pthread_mutex_t shutdown_mutex =
 	PTHREAD_MUTEX_INITIALIZER; // protects access to shutdown_hooks & shutdown_lock_counter
+
+static inline void shutdown_mutex_lock()
+{
+	pthread_mutex_lock(&shutdown_mutex);
+}
+
+static inline void shutdown_mutex_unlock()
+{
+	pthread_mutex_unlock(&shutdown_mutex);
+}
+#endif
 static uint8_t shutdown_lock_counter = 0;
 
 int px4_shutdown_lock()
 {
-	int ret = pthread_mutex_lock(&shutdown_mutex);
-
-	if (ret == 0) {
-		++shutdown_lock_counter;
-		px4_indicate_external_reset_lockout(LockoutComponent::SystemShutdownLock, true);
-		return pthread_mutex_unlock(&shutdown_mutex);
-	}
-
-	return ret;
+	shutdown_mutex_lock();
+	++shutdown_lock_counter;
+	px4_indicate_external_reset_lockout(LockoutComponent::SystemShutdownLock, true);
+	shutdown_mutex_unlock();
+	return 0;
 }
 
 int px4_shutdown_unlock()
 {
-	int ret = pthread_mutex_lock(&shutdown_mutex);
+	shutdown_mutex_lock();
 
-	if (ret == 0) {
-		if (shutdown_lock_counter > 0) {
-			--shutdown_lock_counter;
+	if (shutdown_lock_counter > 0) {
+		--shutdown_lock_counter;
 
-			if (shutdown_lock_counter == 0) {
-				px4_indicate_external_reset_lockout(LockoutComponent::SystemShutdownLock, false);
-			}
-
-		} else {
-			PX4_ERR("unmatched number of px4_shutdown_unlock() calls");
+		if (shutdown_lock_counter == 0) {
+			px4_indicate_external_reset_lockout(LockoutComponent::SystemShutdownLock, false);
 		}
 
-		return pthread_mutex_unlock(&shutdown_mutex);
+	} else {
+		PX4_ERR("unmatched number of px4_shutdown_unlock() calls");
 	}
 
-	return ret;
+	shutdown_mutex_unlock();
+	return 0;
 }
 
 #if defined(CONFIG_SCHED_WORKQUEUE) || (!defined(CONFIG_BUILD_FLAT) && defined(CONFIG_LIBC_USRWORK))
@@ -120,33 +146,33 @@ static constexpr hrt_abstime shutdown_timeout_us =
 
 int px4_register_shutdown_hook(shutdown_hook_t hook)
 {
-	pthread_mutex_lock(&shutdown_mutex);
+	shutdown_mutex_lock();
 
 	for (int i = 0; i < max_shutdown_hooks; ++i) {
 		if (!shutdown_hooks[i]) {
 			shutdown_hooks[i] = hook;
-			pthread_mutex_unlock(&shutdown_mutex);
+			shutdown_mutex_unlock();
 			return 0;
 		}
 	}
 
-	pthread_mutex_unlock(&shutdown_mutex);
+	shutdown_mutex_unlock();
 	return -ENOMEM;
 }
 
 int px4_unregister_shutdown_hook(shutdown_hook_t hook)
 {
-	pthread_mutex_lock(&shutdown_mutex);
+	shutdown_mutex_lock();
 
 	for (int i = 0; i < max_shutdown_hooks; ++i) {
 		if (shutdown_hooks[i] == hook) {
 			shutdown_hooks[i] = nullptr;
-			pthread_mutex_unlock(&shutdown_mutex);
+			shutdown_mutex_unlock();
 			return 0;
 		}
 	}
 
-	pthread_mutex_unlock(&shutdown_mutex);
+	shutdown_mutex_unlock();
 	return -EINVAL;
 }
 

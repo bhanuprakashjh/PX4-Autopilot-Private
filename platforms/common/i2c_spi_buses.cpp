@@ -44,9 +44,44 @@
 #include <px4_platform_common/getopt.h>
 
 #include <pthread.h>
+#include <stdlib.h>
 
 static List<I2CSPIInstance *> i2c_spi_module_instances; ///< list of currently running instances
+
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+static pthread_mutex_t i2c_spi_module_instances_mutex{};
+static pthread_once_t i2c_spi_module_instances_mutex_once = PTHREAD_ONCE_INIT;
+
+static void i2c_spi_module_instances_mutex_init()
+{
+	if (pthread_mutex_init(&i2c_spi_module_instances_mutex, nullptr) != 0) {
+		abort();
+	}
+}
+
+static inline void i2c_spi_module_instances_mutex_lock()
+{
+	pthread_once(&i2c_spi_module_instances_mutex_once, i2c_spi_module_instances_mutex_init);
+	pthread_mutex_lock(&i2c_spi_module_instances_mutex);
+}
+
+static inline void i2c_spi_module_instances_mutex_unlock()
+{
+	pthread_mutex_unlock(&i2c_spi_module_instances_mutex);
+}
+#else
 static pthread_mutex_t i2c_spi_module_instances_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static inline void i2c_spi_module_instances_mutex_lock()
+{
+	pthread_mutex_lock(&i2c_spi_module_instances_mutex);
+}
+
+static inline void i2c_spi_module_instances_mutex_unlock()
+{
+	pthread_mutex_unlock(&i2c_spi_module_instances_mutex);
+}
+#endif
 
 
 I2CSPIDriverConfig::I2CSPIDriverConfig(const BusCLIArguments &cli, const BusInstanceIterator &iterator,
@@ -296,13 +331,13 @@ BusInstanceIterator::BusInstanceIterator(const char *module_name,
 {
 	// We lock the module instance list as long as this object is alive, since we iterate over the list.
 	// Locking could be a bit more fine-grained, but the iterator is mostly only used sequentially, so not an issue.
-	pthread_mutex_lock(&i2c_spi_module_instances_mutex);
+	i2c_spi_module_instances_mutex_lock();
 	_current_instance = i2c_spi_module_instances.end();
 }
 
 BusInstanceIterator::~BusInstanceIterator()
 {
-	pthread_mutex_unlock(&i2c_spi_module_instances_mutex);
+	i2c_spi_module_instances_mutex_unlock();
 }
 
 bool BusInstanceIterator::next()

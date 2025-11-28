@@ -145,7 +145,9 @@
 		GPIO_SPI0_DRDY_ICM20689,  \
 	}
 
-// TEMPORARILY DISABLED: Console buffer causes system hang on warnings/errors (known board issue)
+// Console buffer - DISABLED for SAMV7: global static object constructor runs before
+// NuttX semaphore system is ready. px4_sem_init() cannot be called during C++ static init.
+// Needs lazy initialization approach to work on SAMV7.
 // #define BOARD_ENABLE_CONSOLE_BUFFER
 
 #define BOARD_NUM_IO_TIMERS 3

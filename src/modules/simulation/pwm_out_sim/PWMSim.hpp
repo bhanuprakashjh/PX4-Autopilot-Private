@@ -36,13 +36,30 @@
 #include <drivers/device/device.h>
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_pwm_output.h>
-#include <lib/mixer_module/mixer_module.hpp>
 #include <px4_platform_common/px4_config.h>
 #include <px4_platform_common/module.h>
 #include <px4_platform_common/tasks.h>
 #include <px4_platform_common/time.h>
+#include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
 #include <uORB/topics/parameter_update.h>
+#include <uORB/topics/actuator_outputs.h>
 #include <uORB/Subscription.hpp>
+#include <uORB/Publication.hpp>
+
+/* SAMV7 HITL: Use mode 5 which works around static init issues.
+ * Mode 0 = Full version (crashes on SAMV7 due to BlockingList mutex issue)
+ * Mode 5 = SAMV7-compatible version (skips updateSubscriptions)
+ * See: boards/microchip/samv71-xult-clickboards/SAMV7_STATIC_INIT_ISSUES.md
+ */
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+#define SAMV7_PWMSIM_TEST_MODE 5
+#else
+#define SAMV7_PWMSIM_TEST_MODE 0
+#endif
+
+#if SAMV7_PWMSIM_TEST_MODE == 0 || SAMV7_PWMSIM_TEST_MODE >= 2
+#include <lib/mixer_module/mixer_module.hpp>
+#endif
 
 #if defined(CONFIG_ARCH_BOARD_PX4_SITL)
 #define PARAM_PREFIX "PWM_MAIN"
@@ -52,22 +69,96 @@
 
 using namespace time_literals;
 
+#if SAMV7_PWMSIM_TEST_MODE == 1
+/*******************************************************************************
+ * TEST MODE 1: Minimal with just ScheduledWorkItem (WORKS)
+ ******************************************************************************/
+class PWMSim : public ModuleBase<PWMSim>, public px4::ScheduledWorkItem
+{
+public:
+	PWMSim(bool hil_mode_enabled);
+	~PWMSim() override;
+
+	static int task_spawn(int argc, char *argv[]);
+	static int custom_command(int argc, char *argv[]);
+	static int print_usage(const char *reason = nullptr);
+	int print_status() override;
+
+private:
+	void Run() override;
+
+	uORB::Publication<actuator_outputs_s> _actuator_outputs_sim_pub{ORB_ID(actuator_outputs_sim)};
+	perf_counter_t	_cycle_perf{nullptr};
+	int _run_count{0};
+};
+
+#elif SAMV7_PWMSIM_TEST_MODE == 2
+/*******************************************************************************
+ * TEST MODE 2: OutputModuleInterface WITHOUT MixingOutput (WORKS)
+ ******************************************************************************/
 class PWMSim : public ModuleBase<PWMSim>, public OutputModuleInterface
 {
 public:
 	PWMSim(bool hil_mode_enabled);
 	~PWMSim() override;
 
-	/** @see ModuleBase */
 	static int task_spawn(int argc, char *argv[]);
-
-	/** @see ModuleBase */
 	static int custom_command(int argc, char *argv[]);
-
-	/** @see ModuleBase */
 	static int print_usage(const char *reason = nullptr);
+	int print_status() override;
 
-	/** @see ModuleBase::print_status() */
+	bool updateOutputs(uint16_t outputs[MAX_ACTUATORS],
+			   unsigned num_outputs, unsigned num_control_groups_updated) override;
+
+private:
+	void Run() override;
+
+	uORB::Publication<actuator_outputs_s> _actuator_outputs_sim_pub{ORB_ID(actuator_outputs_sim)};
+	perf_counter_t	_cycle_perf{nullptr};
+	int _run_count{0};
+};
+
+#elif SAMV7_PWMSIM_TEST_MODE == 3
+/*******************************************************************************
+ * TEST MODE 3: MixingOutput with MINIMAL init (no setAll* calls) - WORKS
+ ******************************************************************************/
+class PWMSim : public ModuleBase<PWMSim>, public OutputModuleInterface
+{
+public:
+	PWMSim(bool hil_mode_enabled);
+	~PWMSim() override;
+
+	static int task_spawn(int argc, char *argv[]);
+	static int custom_command(int argc, char *argv[]);
+	static int print_usage(const char *reason = nullptr);
+	int print_status() override;
+
+	bool updateOutputs(uint16_t outputs[MAX_ACTUATORS],
+			   unsigned num_outputs, unsigned num_control_groups_updated) override;
+
+private:
+	void Run() override;
+
+	MixingOutput _mixing_output;
+
+	uORB::Publication<actuator_outputs_s> _actuator_outputs_sim_pub{ORB_ID(actuator_outputs_sim)};
+	perf_counter_t	_cycle_perf{nullptr};
+	int _run_count{0};
+};
+
+#elif SAMV7_PWMSIM_TEST_MODE == 4
+/*******************************************************************************
+ * TEST MODE 4: MixingOutput + setAll* calls, no update() (WORKS)
+ ******************************************************************************/
+class PWMSim : public ModuleBase<PWMSim>, public OutputModuleInterface
+{
+public:
+	PWMSim(bool hil_mode_enabled);
+	~PWMSim() override;
+
+	static int task_spawn(int argc, char *argv[]);
+	static int custom_command(int argc, char *argv[]);
+	static int print_usage(const char *reason = nullptr);
 	int print_status() override;
 
 	bool updateOutputs(uint16_t outputs[MAX_ACTUATORS],
@@ -81,11 +172,77 @@ private:
 	static constexpr uint16_t PWM_SIM_PWM_MIN_MAGIC = 1000;
 	static constexpr uint16_t PWM_SIM_PWM_MAX_MAGIC = 2000;
 
-	MixingOutput _mixing_output{PARAM_PREFIX, MAX_ACTUATORS, *this, MixingOutput::SchedulingPolicy::Auto, false, false};
-	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
+	MixingOutput _mixing_output;
+
+	uORB::Publication<actuator_outputs_s> _actuator_outputs_sim_pub{ORB_ID(actuator_outputs_sim)};
+	perf_counter_t	_cycle_perf{nullptr};
+	int _run_count{0};
+};
+
+#elif SAMV7_PWMSIM_TEST_MODE == 5
+/*******************************************************************************
+ * SAMV7 HITL version - verified working
+ ******************************************************************************/
+class PWMSim : public ModuleBase<PWMSim>, public OutputModuleInterface
+{
+public:
+	PWMSim(bool hil_mode_enabled);
+	~PWMSim() override;
+
+	static int task_spawn(int argc, char *argv[]);
+	static int custom_command(int argc, char *argv[]);
+	static int print_usage(const char *reason = nullptr);
+	int print_status() override;
+
+	bool updateOutputs(uint16_t outputs[MAX_ACTUATORS],
+			   unsigned num_outputs, unsigned num_control_groups_updated) override;
+
+private:
+	void Run() override;
+
+	static constexpr uint16_t PWM_SIM_DISARMED_MAGIC = 900;
+	static constexpr uint16_t PWM_SIM_FAILSAFE_MAGIC = 600;
+	static constexpr uint16_t PWM_SIM_PWM_MIN_MAGIC = 1000;
+	static constexpr uint16_t PWM_SIM_PWM_MAX_MAGIC = 2000;
+
+	MixingOutput _mixing_output;
+
+	uORB::Publication<actuator_outputs_s> _actuator_outputs_sim_pub{ORB_ID(actuator_outputs_sim)};
+	perf_counter_t	_cycle_perf{nullptr};
+};
+
+#else
+/*******************************************************************************
+ * TEST MODE 0: Full version with MixingOutput
+ ******************************************************************************/
+class PWMSim : public ModuleBase<PWMSim>, public OutputModuleInterface
+{
+public:
+	PWMSim(bool hil_mode_enabled);
+	~PWMSim() override;
+
+	static int task_spawn(int argc, char *argv[]);
+	static int custom_command(int argc, char *argv[]);
+	static int print_usage(const char *reason = nullptr);
+	int print_status() override;
+
+	bool updateOutputs(uint16_t outputs[MAX_ACTUATORS],
+			   unsigned num_outputs, unsigned num_control_groups_updated) override;
+
+private:
+	void Run() override;
+
+	static constexpr uint16_t PWM_SIM_DISARMED_MAGIC = 900;
+	static constexpr uint16_t PWM_SIM_FAILSAFE_MAGIC = 600;
+	static constexpr uint16_t PWM_SIM_PWM_MIN_MAGIC = 1000;
+	static constexpr uint16_t PWM_SIM_PWM_MAX_MAGIC = 2000;
+
+	MixingOutput _mixing_output;
+	uORB::SubscriptionInterval _parameter_update_sub;
 
 	uORB::Publication<actuator_outputs_s> _actuator_outputs_sim_pub{ORB_ID(actuator_outputs_sim)};
 
-	perf_counter_t	_cycle_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")};
-	perf_counter_t	_interval_perf{perf_alloc(PC_INTERVAL, MODULE_NAME": interval")};
+	perf_counter_t	_cycle_perf{nullptr};
+	perf_counter_t	_interval_perf{nullptr};
 };
+#endif

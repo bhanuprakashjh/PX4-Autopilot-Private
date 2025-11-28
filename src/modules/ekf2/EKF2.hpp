@@ -125,6 +125,31 @@
 
 extern pthread_mutex_t ekf2_module_mutex;
 
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+extern pthread_once_t ekf2_module_mutex_once;
+void ekf2_module_mutex_runtime_init();
+static inline void ekf2_module_lock()
+{
+	pthread_once(&ekf2_module_mutex_once, ekf2_module_mutex_runtime_init);
+	pthread_mutex_lock(&ekf2_module_mutex);
+}
+
+static inline bool ekf2_module_trylock()
+{
+	pthread_once(&ekf2_module_mutex_once, ekf2_module_mutex_runtime_init);
+	return pthread_mutex_trylock(&ekf2_module_mutex) == 0;
+}
+
+static inline void ekf2_module_unlock()
+{
+	pthread_mutex_unlock(&ekf2_module_mutex);
+}
+#else
+static inline void ekf2_module_lock() { pthread_mutex_lock(&ekf2_module_mutex); }
+static inline bool ekf2_module_trylock() { return pthread_mutex_trylock(&ekf2_module_mutex) == 0; }
+static inline void ekf2_module_unlock() { pthread_mutex_unlock(&ekf2_module_mutex); }
+#endif
+
 class EKF2 final : public ModuleParams, public px4::ScheduledWorkItem
 {
 public:
@@ -147,9 +172,9 @@ public:
 
 	void request_stop() { _task_should_exit.store(true); }
 
-	static void lock_module() { pthread_mutex_lock(&ekf2_module_mutex); }
-	static bool trylock_module() { return (pthread_mutex_trylock(&ekf2_module_mutex) == 0); }
-	static void unlock_module() { pthread_mutex_unlock(&ekf2_module_mutex); }
+	static void lock_module() { ekf2_module_lock(); }
+	static bool trylock_module() { return ekf2_module_trylock(); }
+	static void unlock_module() { ekf2_module_unlock(); }
 
 #if defined(CONFIG_EKF2_MULTI_INSTANCE)
 	bool multi_init(int imu, int mag);

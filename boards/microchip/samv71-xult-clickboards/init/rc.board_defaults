@@ -1,13 +1,18 @@
 #!/bin/sh
 # board defaults
 # MAVLink enabled on USB CDC/ACM (ttyACM0)
-param set-default SYS_AUTOSTART 0
+# TEST: Using real quad airframe (4001) to test if MC modules work
+# HIL airframe (1001) was causing continuous resets
+param set SYS_AUTOSTART 4001
 param set-default SYS_USB_AUTO 2
 param set-default USB_MAV_MODE 0
 param set-default MAV_0_CONFIG 101
 param set-default MAV_0_RATE 57600
 param set-default MAV_0_FORWARD 0
 param set-default SDLOG_MODE -1
+
+# Disable external I2C sensor probing (we use specific Click board drivers)
+param set-default SENS_EXT_I2C_PRB 0
 
 # Disable sensor checks for companion computer / HITL mode
 # Allow arming without physical sensors (data comes via MAVLink)
@@ -19,5 +24,12 @@ param set-default SYS_HAS_BARO 0
 # Circuit breaker for flight termination (required for HITL)
 param set-default CBRK_FLIGHTTERM 121212
 
-# Increase parameter stream rate for better QGC sync
-param set-default MAV_PARAM_RATE 100
+# HITL actuator output configuration (quadcopter)
+# 101-104 = Motor1-Motor4
+param set-default HIL_ACT_FUNC1 101
+param set-default HIL_ACT_FUNC2 102
+param set-default HIL_ACT_FUNC3 103
+param set-default HIL_ACT_FUNC4 104
+
+# Note: MAV_PARAM_RATE doesn't exist in this PX4 version
+# Parameter streaming rate is controlled per-instance via MAV_x_RATE

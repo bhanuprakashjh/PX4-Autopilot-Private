@@ -99,7 +99,40 @@ static sq_queue_t	perf_counters = { nullptr, nullptr };
 /**
  * mutex protecting access to the perf_counters linked list (which is read from & written to by different threads)
  */
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+static pthread_mutex_t perf_counters_mutex{};
+static pthread_once_t perf_counters_mutex_once = PTHREAD_ONCE_INIT;
+
+static void perf_counters_mutex_init()
+{
+	if (pthread_mutex_init(&perf_counters_mutex, nullptr) != 0) {
+		abort();
+	}
+}
+
+static inline void perf_counters_mutex_lock()
+{
+	pthread_once(&perf_counters_mutex_once, perf_counters_mutex_init);
+	pthread_mutex_lock(&perf_counters_mutex);
+}
+
+static inline void perf_counters_mutex_unlock()
+{
+	pthread_mutex_unlock(&perf_counters_mutex);
+}
+#else
 pthread_mutex_t perf_counters_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static inline void perf_counters_mutex_lock()
+{
+	pthread_mutex_lock(&perf_counters_mutex);
+}
+
+static inline void perf_counters_mutex_unlock()
+{
+	pthread_mutex_unlock(&perf_counters_mutex);
+}
+#endif
 // FIXME: the mutex does **not** protect against access to/from the perf
 // counter's data. It can still happen that a counter is updated while it is
 // printed. This can lead to inconsistent output, or completely bogus values
@@ -130,13 +163,13 @@ perf_alloc(enum perf_counter_type type, const char *name)
 		break;
 	}
 
-	if (ctr != nullptr) {
-		ctr->type = type;
-		ctr->name = name;
-		pthread_mutex_lock(&perf_counters_mutex);
-		sq_addfirst(&ctr->link, &perf_counters);
-		pthread_mutex_unlock(&perf_counters_mutex);
-	}
+		if (ctr != nullptr) {
+			ctr->type = type;
+			ctr->name = name;
+			perf_counters_mutex_lock();
+			sq_addfirst(&ctr->link, &perf_counters);
+			perf_counters_mutex_unlock();
+		}
 
 	return ctr;
 }
@@ -144,19 +177,19 @@ perf_alloc(enum perf_counter_type type, const char *name)
 perf_counter_t
 perf_alloc_once(enum perf_counter_type type, const char *name)
 {
-	pthread_mutex_lock(&perf_counters_mutex);
+	perf_counters_mutex_lock();
 	perf_counter_t handle = (perf_counter_t)sq_peek(&perf_counters);
 
 	while (handle != nullptr) {
 		if (!strcmp(handle->name, name)) {
 			if (type == handle->type) {
 				/* they are the same counter */
-				pthread_mutex_unlock(&perf_counters_mutex);
+				perf_counters_mutex_unlock();
 				return handle;
 
 			} else {
 				/* same name but different type, assuming this is an error and not intended */
-				pthread_mutex_unlock(&perf_counters_mutex);
+				perf_counters_mutex_unlock();
 				return nullptr;
 			}
 		}
@@ -164,7 +197,7 @@ perf_alloc_once(enum perf_counter_type type, const char *name)
 		handle = (perf_counter_t)sq_next(&handle->link);
 	}
 
-	pthread_mutex_unlock(&perf_counters_mutex);
+	perf_counters_mutex_unlock();
 
 	/* if the execution reaches here, no existing counter of that name was found */
 	return perf_alloc(type, name);
@@ -177,9 +210,9 @@ perf_free(perf_counter_t handle)
 		return;
 	}
 
-	pthread_mutex_lock(&perf_counters_mutex);
+	perf_counters_mutex_lock();
 	sq_rem(&handle->link, &perf_counters);
-	pthread_mutex_unlock(&perf_counters_mutex);
+	perf_counters_mutex_unlock();
 
 	switch (handle->type) {
 	case PC_COUNT:
@@ -590,7 +623,7 @@ perf_mean(perf_counter_t handle)
 void
 perf_iterate_all(perf_callback cb, void *user)
 {
-	pthread_mutex_lock(&perf_counters_mutex);
+	perf_counters_mutex_lock();
 	perf_counter_t handle = (perf_counter_t)sq_peek(&perf_counters);
 
 	while (handle != nullptr) {
@@ -598,13 +631,13 @@ perf_iterate_all(perf_callback cb, void *user)
 		handle = (perf_counter_t)sq_next(&handle->link);
 	}
 
-	pthread_mutex_unlock(&perf_counters_mutex);
+	perf_counters_mutex_unlock();
 }
 
 void
 perf_print_all(void)
 {
-	pthread_mutex_lock(&perf_counters_mutex);
+	perf_counters_mutex_lock();
 	perf_counter_t handle = (perf_counter_t)sq_peek(&perf_counters);
 
 	while (handle != nullptr) {
@@ -612,7 +645,7 @@ perf_print_all(void)
 		handle = (perf_counter_t)sq_next(&handle->link);
 	}
 
-	pthread_mutex_unlock(&perf_counters_mutex);
+	perf_counters_mutex_unlock();
 }
 
 void

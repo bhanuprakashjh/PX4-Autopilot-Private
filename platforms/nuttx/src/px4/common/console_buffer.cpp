@@ -50,7 +50,6 @@ static ssize_t console_buffer_write(struct file *filep, const char *buffer, size
 class ConsoleBuffer
 {
 public:
-
 	void write(const char *buffer, size_t len);
 
 	void print(bool follow);
@@ -66,6 +65,10 @@ private:
 	char _buffer[BOARD_CONSOLE_BUFFER_SIZE];
 	int _head{0};
 	int _tail{0};
+	// NOTE: SEM_INITIALIZER works here because it's placed in .data at compile time.
+	// This file is guarded by BOARD_ENABLE_CONSOLE_BUFFER which is DISABLED for SAMV7
+	// because SEM_INITIALIZER doesn't work reliably on that platform for C++ class members.
+	// See boards/microchip/samv71-xult-clickboards/SAMV7_STATIC_INIT_EXPLAINED.md
 	px4_sem_t _lock = SEM_INITIALIZER(1);
 };
 

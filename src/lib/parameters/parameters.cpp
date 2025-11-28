@@ -51,6 +51,7 @@
 #include <crc32.h>
 #include <float.h>
 #include <math.h>
+#include <stdlib.h>
 
 #include <containers/Bitset.hpp>
 #include <drivers/drv_hrt.h>
@@ -122,8 +123,52 @@ static perf_counter_t param_find_perf;
 static perf_counter_t param_get_perf;
 static perf_counter_t param_set_perf;
 
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+static pthread_mutex_t file_mutex{};
+static pthread_once_t file_mutex_once = PTHREAD_ONCE_INIT;
+
+static void file_mutex_init()
+{
+	if (pthread_mutex_init(&file_mutex, nullptr) != 0) {
+		abort();
+	}
+}
+
+static inline void file_mutex_lock()
+{
+	pthread_once(&file_mutex_once, file_mutex_init);
+	pthread_mutex_lock(&file_mutex);
+}
+
+static inline int file_mutex_trylock()
+{
+	pthread_once(&file_mutex_once, file_mutex_init);
+	return pthread_mutex_trylock(&file_mutex);
+}
+
+static inline void file_mutex_unlock()
+{
+	pthread_mutex_unlock(&file_mutex);
+}
+#else
 static pthread_mutex_t file_mutex  =
 	PTHREAD_MUTEX_INITIALIZER; ///< this protects against concurrent param saves (file or flash access).
+
+static inline void file_mutex_lock()
+{
+	pthread_mutex_lock(&file_mutex);
+}
+
+static inline int file_mutex_trylock()
+{
+	return pthread_mutex_trylock(&file_mutex);
+}
+
+static inline void file_mutex_unlock()
+{
+	pthread_mutex_unlock(&file_mutex);
+}
+#endif
 
 // Support for remote parameter node
 #if defined(CONFIG_PARAM_PRIMARY)
@@ -802,10 +847,10 @@ int param_save_default(bool blocking)
 
 	// take the file lock
 	if (blocking) {
-		pthread_mutex_lock(&file_mutex);
+		file_mutex_lock();
 
 	} else {
-		if (pthread_mutex_trylock(&file_mutex) != 0) {
+		if (file_mutex_trylock() != 0) {
 			PX4_DEBUG("param_save_default: file lock failed (already locked)");
 			return -EWOULDBLOCK;
 		}
@@ -883,7 +928,7 @@ int param_save_default(bool blocking)
 		}
 	}
 
-	pthread_mutex_unlock(&file_mutex);
+	file_mutex_unlock();
 
 	if (shutdown_lock_ret == 0) {
 		px4_shutdown_unlock();
@@ -1044,7 +1089,7 @@ param_export(const char *filename, param_filter_func filter)
 	}
 
 	// take the file lock
-	if (pthread_mutex_trylock(&file_mutex) != 0) {
+	if (file_mutex_trylock() != 0) {
 		PX4_ERR("param_export: file lock failed (already locked)");
 		return PX4_ERROR;
 	}
@@ -1063,7 +1108,7 @@ param_export(const char *filename, param_filter_func filter)
 
 	perf_end(param_export_perf);
 
-	pthread_mutex_unlock(&file_mutex);
+	file_mutex_unlock();
 
 	if (shutdown_lock_ret == 0) {
 		px4_shutdown_unlock();

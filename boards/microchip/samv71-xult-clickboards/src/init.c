@@ -78,6 +78,14 @@
 #include <systemlib/px4_macros.h>
 #include <px4_platform_common/init.h>
 #include <px4_platform/gpio.h>
+
+/* SAMV7 MATRIX CCFG_PCCR register - not in upstream NuttX, define locally */
+#ifndef SAM_MATRIX_CCFG_PCCR
+#  define SAM_MATRIX_CCFG_PCCR      (SAM_MATRIX_BASE + 0x0118)
+#endif
+#ifndef MATRIX_CCFG_PCCR_TC0CC
+#  define MATRIX_CCFG_PCCR_TC0CC    (1 << 21)  /* TC0 clock selection */
+#endif
 #include <px4_platform/board_dma_alloc.h>
 #include <sys/mount.h>
 #include <sys/stat.h>

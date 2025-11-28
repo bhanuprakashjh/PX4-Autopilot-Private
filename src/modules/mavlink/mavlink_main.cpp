@@ -55,6 +55,7 @@
 #include <lib/version/version.h>
 
 #include <px4_platform_common/events.h>
+#include <stdlib.h>
 
 #include <uORB/topics/event.h>
 #include "mavlink_receiver.h"
@@ -80,8 +81,44 @@
 #define MAX_DATA_RATE                  10000000        ///< max data rate in bytes/s
 #define MAIN_LOOP_DELAY                10000           ///< 100 Hz @ 1000 bytes/s data rate
 
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+static pthread_mutex_t mavlink_module_mutex{};
+static pthread_mutex_t mavlink_event_buffer_mutex{};
+static pthread_once_t mavlink_module_mutex_once = PTHREAD_ONCE_INIT;
+static pthread_once_t mavlink_event_buffer_mutex_once = PTHREAD_ONCE_INIT;
+
+static void mavlink_module_mutex_init()
+{
+	if (pthread_mutex_init(&mavlink_module_mutex, nullptr) != 0) {
+		abort();
+	}
+}
+
+static void mavlink_event_buffer_mutex_init()
+{
+	if (pthread_mutex_init(&mavlink_event_buffer_mutex, nullptr) != 0) {
+		abort();
+	}
+}
+
+static inline pthread_mutex_t &get_mavlink_module_mutex()
+{
+	pthread_once(&mavlink_module_mutex_once, mavlink_module_mutex_init);
+	return mavlink_module_mutex;
+}
+
+static inline pthread_mutex_t &get_mavlink_event_buffer_mutex()
+{
+	pthread_once(&mavlink_event_buffer_mutex_once, mavlink_event_buffer_mutex_init);
+	return mavlink_event_buffer_mutex;
+}
+#else
 static pthread_mutex_t mavlink_module_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t mavlink_event_buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static inline pthread_mutex_t &get_mavlink_module_mutex() { return mavlink_module_mutex; }
+static inline pthread_mutex_t &get_mavlink_event_buffer_mutex() { return mavlink_event_buffer_mutex; }
+#endif
 events::EventBuffer *Mavlink::_event_buffer = nullptr;
 
 Mavlink *mavlink_module_instances[MAVLINK_COMM_NUM_BUFFERS] {};
@@ -245,7 +282,7 @@ bool Mavlink::set_channel()
 bool
 Mavlink::set_instance_id()
 {
-	LockGuard lg{mavlink_module_mutex};
+	LockGuard lg{get_mavlink_module_mutex()};
 
 	// instance count
 	size_t inst_count = 0;
@@ -287,7 +324,7 @@ void Mavlink::setProtocolVersion(uint8_t version)
 int
 Mavlink::instance_count()
 {
-	LockGuard lg{mavlink_module_mutex};
+	LockGuard lg{get_mavlink_module_mutex()};
 	size_t inst_index = 0;
 
 	for (Mavlink *inst : mavlink_module_instances) {
@@ -302,7 +339,7 @@ Mavlink::instance_count()
 Mavlink *
 Mavlink::get_instance_for_device(const char *device_name)
 {
-	LockGuard lg{mavlink_module_mutex};
+	LockGuard lg{get_mavlink_module_mutex()};
 
 	for (Mavlink *inst : mavlink_module_instances) {
 		if (inst && (inst->_protocol == Protocol::SERIAL) && (strcmp(inst->_device_name, device_name) == 0)) {
@@ -317,7 +354,7 @@ Mavlink::get_instance_for_device(const char *device_name)
 Mavlink *
 Mavlink::get_instance_for_network_port(unsigned long port)
 {
-	LockGuard lg{mavlink_module_mutex};
+	LockGuard lg{get_mavlink_module_mutex()};
 
 	for (Mavlink *inst : mavlink_module_instances) {
 		if (inst && (inst->_protocol == Protocol::UDP) && (inst->_network_port == port)) {
@@ -339,7 +376,7 @@ Mavlink::destroy_all_instances()
 	while (iterations < 1000) {
 		int running = 0;
 
-		pthread_mutex_lock(&mavlink_module_mutex);
+		pthread_mutex_lock(&get_mavlink_module_mutex());
 
 		for (Mavlink *inst_to_del : mavlink_module_instances) {
 			if (inst_to_del != nullptr) {
@@ -352,7 +389,7 @@ Mavlink::destroy_all_instances()
 			}
 		}
 
-		pthread_mutex_unlock(&mavlink_module_mutex);
+		pthread_mutex_unlock(&get_mavlink_module_mutex());
 
 		if (running == 0) {
 			break;
@@ -370,7 +407,7 @@ Mavlink::destroy_all_instances()
 	}
 
 	{
-		LockGuard lg{mavlink_module_mutex};
+		LockGuard lg{get_mavlink_module_mutex()};
 
 		// we know all threads have exited, so it's safe to delete objects.
 		for (Mavlink *inst_to_del : mavlink_module_instances) {
@@ -379,7 +416,7 @@ Mavlink::destroy_all_instances()
 	}
 
 	{
-		LockGuard lg{mavlink_event_buffer_mutex};
+		LockGuard lg{get_mavlink_event_buffer_mutex()};
 
 		delete _event_buffer;
 		_event_buffer = nullptr;
@@ -392,7 +429,7 @@ Mavlink::destroy_all_instances()
 int
 Mavlink::get_status_all_instances(bool show_streams_status)
 {
-	LockGuard lg{mavlink_module_mutex};
+	LockGuard lg{get_mavlink_module_mutex()};
 	unsigned iterations = 0;
 
 	for (Mavlink *inst : mavlink_module_instances) {
@@ -417,7 +454,7 @@ Mavlink::get_status_all_instances(bool show_streams_status)
 bool
 Mavlink::serial_instance_exists(const char *device_name, Mavlink *self)
 {
-	LockGuard lg{mavlink_module_mutex};
+	LockGuard lg{get_mavlink_module_mutex()};
 
 	for (Mavlink *inst : mavlink_module_instances) {
 		/* don't compare with itself and with non serial instances*/
@@ -432,7 +469,7 @@ Mavlink::serial_instance_exists(const char *device_name, Mavlink *self)
 bool
 Mavlink::component_was_seen(int system_id, int component_id, Mavlink &self)
 {
-	LockGuard lg{mavlink_module_mutex};
+	LockGuard lg{get_mavlink_module_mutex()};
 
 	for (Mavlink *inst : mavlink_module_instances) {
 		if (inst && (inst != &self) && (inst->_receiver.component_was_seen(system_id, component_id))) {
@@ -477,7 +514,7 @@ Mavlink::forward_message(const mavlink_message_t *msg, Mavlink *self)
 		return;
 	}
 
-	LockGuard lg{mavlink_module_mutex};
+	LockGuard lg{get_mavlink_module_mutex()};
 
 	for (Mavlink *inst : mavlink_module_instances) {
 		if (inst && (inst != self) && (inst->get_forwarding_on())) {
@@ -2429,7 +2466,7 @@ Mavlink::task_main(int argc, char *argv[])
 		/* handle new events */
 		if (check_events()) {
 			if (_event_sub.updated()) {
-				LockGuard lg{mavlink_event_buffer_mutex};
+				LockGuard lg{get_mavlink_event_buffer_mutex()};
 
 				event_s orb_event;
 
@@ -3207,7 +3244,7 @@ Mavlink::stop_command(int argc, char *argv[])
 					return PX4_ERROR;
 				}
 
-				LockGuard lg{mavlink_module_mutex};
+				LockGuard lg{get_mavlink_module_mutex()};
 
 				for (int mavlink_instance = 0; mavlink_instance < MAVLINK_COMM_NUM_BUFFERS; mavlink_instance++) {
 					if (mavlink_module_instances[mavlink_instance] == inst) {
@@ -3357,7 +3394,7 @@ Mavlink::set_boot_complete()
 	_boot_complete = true;
 
 #if defined(MAVLINK_UDP)
-	LockGuard lg {mavlink_module_mutex};
+	LockGuard lg {get_mavlink_module_mutex()};
 
 	for (Mavlink *inst : mavlink_module_instances) {
 		if (inst && (inst->get_mode() != MAVLINK_MODE_ONBOARD) &&

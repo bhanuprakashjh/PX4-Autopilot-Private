@@ -35,6 +35,7 @@
 
 #include <uORB/Publication.hpp>
 #include <px4_platform_common/log.h>
+#include <syslog.h>
 
 using namespace time_literals;
 

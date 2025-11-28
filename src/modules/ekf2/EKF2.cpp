@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include <px4_platform_common/events.h>
+#include <stdlib.h>
 #include "EKF2.hpp"
 
 using namespace time_literals;
@@ -43,7 +44,19 @@ using matrix::Vector3f;
 static constexpr float kDefaultExternalPosAccuracy = 50.0f; // [m]
 static constexpr float kMaxDelaySecondsExternalPosMeasurement = 15.0f; // [s]
 
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+pthread_mutex_t ekf2_module_mutex{};
+pthread_once_t ekf2_module_mutex_once = PTHREAD_ONCE_INIT;
+
+void ekf2_module_mutex_runtime_init()
+{
+	if (pthread_mutex_init(&ekf2_module_mutex, nullptr) != 0) {
+		abort();
+	}
+}
+#else
 pthread_mutex_t ekf2_module_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 static px4::atomic<EKF2 *> _objects[EKF2_MAX_INSTANCES] {};
 #if defined(CONFIG_EKF2_MULTI_INSTANCE)
 static px4::atomic<EKF2Selector *> _ekf2_selector {nullptr};

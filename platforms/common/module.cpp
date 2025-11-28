@@ -43,8 +43,21 @@
 #include <px4_platform_common/module.h>
 #include <px4_platform_common/defines.h>
 #include <px4_platform_common/log.h>
+#include <stdlib.h>
 
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+pthread_mutex_t px4_modules_mutex{};
+pthread_once_t px4_modules_mutex_once = PTHREAD_ONCE_INIT;
+
+void px4_modules_mutex_runtime_init()
+{
+	if (pthread_mutex_init(&px4_modules_mutex, nullptr) != 0) {
+		abort();
+	}
+}
+#else
 pthread_mutex_t px4_modules_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 #ifndef __PX4_NUTTX
 

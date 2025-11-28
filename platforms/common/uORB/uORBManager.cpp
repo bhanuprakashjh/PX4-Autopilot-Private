@@ -35,6 +35,7 @@
 #include <sys/stat.h>
 #include <stdarg.h>
 #include <fcntl.h>
+#include <stdlib.h>
 
 #include <px4_platform_common/px4_config.h>
 #include <px4_platform_common/posix.h>
@@ -49,7 +50,30 @@
 #include "uORBManager.hpp"
 
 #ifdef CONFIG_ORB_COMMUNICATOR
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+pthread_mutex_t uORB::Manager::_communicator_mutex{};
+pthread_once_t uORB::Manager::_communicator_mutex_once = PTHREAD_ONCE_INIT;
+
+void uORB::Manager::communicator_mutex_runtime_init()
+{
+	if (pthread_mutex_init(&_communicator_mutex, nullptr) != 0) {
+		abort();
+	}
+}
+
+static inline pthread_mutex_t &get_communicator_mutex()
+{
+	pthread_once(&uORB::Manager::_communicator_mutex_once, uORB::Manager::communicator_mutex_runtime_init);
+	return uORB::Manager::_communicator_mutex;
+}
+#else
 pthread_mutex_t uORB::Manager::_communicator_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static inline pthread_mutex_t &get_communicator_mutex()
+{
+	return uORB::Manager::_communicator_mutex;
+}
+#endif
 #endif
 
 uORB::Manager *uORB::Manager::_Instance = nullptr;
@@ -569,21 +593,21 @@ int uORB::Manager::node_open(const struct orb_metadata *meta, bool advertiser, i
 #ifdef CONFIG_ORB_COMMUNICATOR
 void uORB::Manager::set_uorb_communicator(uORBCommunicator::IChannel *channel)
 {
-	pthread_mutex_lock(&_communicator_mutex);
+	pthread_mutex_lock(&get_communicator_mutex());
 
 	if (channel != nullptr) {
 		channel->register_handler(this);
 		_comm_channel = channel;
 	}
 
-	pthread_mutex_unlock(&_communicator_mutex);
+	pthread_mutex_unlock(&get_communicator_mutex());
 }
 
 uORBCommunicator::IChannel *uORB::Manager::get_uorb_communicator()
 {
-	pthread_mutex_lock(&_communicator_mutex);
+	pthread_mutex_lock(&get_communicator_mutex());
 	uORBCommunicator::IChannel *temp = _comm_channel;
-	pthread_mutex_unlock(&_communicator_mutex);
+	pthread_mutex_unlock(&get_communicator_mutex());
 
 	return temp;
 }

@@ -59,6 +59,31 @@
  */
 extern pthread_mutex_t px4_modules_mutex;
 
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+extern pthread_once_t px4_modules_mutex_once;
+void px4_modules_mutex_runtime_init();
+static inline void px4_modules_mutex_lock_runtime()
+{
+	pthread_once(&px4_modules_mutex_once, px4_modules_mutex_runtime_init);
+	pthread_mutex_lock(&px4_modules_mutex);
+}
+
+static inline void px4_modules_mutex_unlock_runtime()
+{
+	pthread_mutex_unlock(&px4_modules_mutex);
+}
+#else
+static inline void px4_modules_mutex_lock_runtime()
+{
+	pthread_mutex_lock(&px4_modules_mutex);
+}
+
+static inline void px4_modules_mutex_unlock_runtime()
+{
+	pthread_mutex_unlock(&px4_modules_mutex);
+}
+#endif
+
 /**
  * @class ModuleBase
  *      Base class for modules, implementing common functionality,
@@ -405,7 +430,7 @@ private:
 	 */
 	static void lock_module()
 	{
-		pthread_mutex_lock(&px4_modules_mutex);
+		px4_modules_mutex_lock_runtime();
 	}
 
 	/**
@@ -413,7 +438,7 @@ private:
 	 */
 	static void unlock_module()
 	{
-		pthread_mutex_unlock(&px4_modules_mutex);
+		px4_modules_mutex_unlock_runtime();
 	}
 
 	/** @var _task_should_exit Boolean flag to indicate if the task should exit. */

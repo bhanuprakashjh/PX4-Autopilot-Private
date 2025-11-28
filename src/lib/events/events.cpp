@@ -32,14 +32,49 @@
  ****************************************************************************/
 
 #include <pthread.h>
+#include <stdlib.h>
 
 #include <drivers/drv_hrt.h>
 #include <px4_platform_common/posix.h>
 #include <px4_platform_common/events.h>
 #include <uORB/uORB.h>
 
-static orb_advert_t orb_event_pub = nullptr;
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+static pthread_mutex_t publish_event_mutex{};
+static pthread_once_t publish_event_mutex_once = PTHREAD_ONCE_INIT;
+
+static void publish_event_mutex_init()
+{
+	if (pthread_mutex_init(&publish_event_mutex, nullptr) != 0) {
+		abort();
+	}
+}
+
+static inline void publish_event_mutex_lock()
+{
+	pthread_once(&publish_event_mutex_once, publish_event_mutex_init);
+	pthread_mutex_lock(&publish_event_mutex);
+}
+
+static inline void publish_event_mutex_unlock()
+{
+	pthread_mutex_unlock(&publish_event_mutex);
+}
+#else
 static pthread_mutex_t publish_event_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static inline void publish_event_mutex_lock()
+{
+	pthread_mutex_lock(&publish_event_mutex);
+}
+
+static inline void publish_event_mutex_unlock()
+{
+	pthread_mutex_unlock(&publish_event_mutex);
+}
+#endif
+
+static orb_advert_t orb_event_pub = nullptr;
 static uint16_t event_sequence{events::initial_event_sequence};
 
 namespace events
@@ -54,17 +89,17 @@ void send(event_s &event)
 	// - the update of event_sequence needs to be atomic
 	// - we need to ensure ordering of the sequence numbers: the sequence we set here
 	//   has to be the one published next.
-	pthread_mutex_lock(&publish_event_mutex);
-	event.event_sequence = ++event_sequence; // Set the sequence here so we're able to detect uORB queue overflows
+		publish_event_mutex_lock();
+		event.event_sequence = ++event_sequence; // Set the sequence here so we're able to detect uORB queue overflows
 
-	if (orb_event_pub != nullptr) {
-		orb_publish(ORB_ID(event), orb_event_pub, &event);
+		if (orb_event_pub != nullptr) {
+			orb_publish(ORB_ID(event), orb_event_pub, &event);
 
 	} else {
 		orb_event_pub = orb_advertise(ORB_ID(event), &event);
 	}
 
-	pthread_mutex_unlock(&publish_event_mutex);
+		publish_event_mutex_unlock();
 }
 
 } /* namespace events */

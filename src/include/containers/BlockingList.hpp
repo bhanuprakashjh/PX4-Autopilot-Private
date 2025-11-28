@@ -50,6 +50,21 @@ class BlockingList : public IntrusiveSortedList<T>
 {
 public:
 
+	BlockingList()
+	{
+		int ret = pthread_mutex_init(&_mutex, nullptr);
+
+		if (ret != 0) {
+			abort();
+		}
+
+		ret = pthread_cond_init(&_cv, nullptr);
+
+		if (ret != 0) {
+			abort();
+		}
+	}
+
 	~BlockingList()
 	{
 		pthread_mutex_destroy(&_mutex);
@@ -84,7 +99,7 @@ public:
 
 private:
 
-	pthread_mutex_t	_mutex = PTHREAD_MUTEX_INITIALIZER;
-	pthread_cond_t	_cv = PTHREAD_COND_INITIALIZER;
+	pthread_mutex_t	_mutex{};
+	pthread_cond_t	_cv{};
 
 };

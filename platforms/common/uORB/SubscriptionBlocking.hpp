@@ -37,6 +37,7 @@
 
 #include <containers/LockGuard.hpp>
 #include <px4_time.h>
+#include <stdlib.h>
 
 namespace uORB
 {
@@ -56,6 +57,19 @@ public:
 	SubscriptionBlocking(const orb_metadata *meta, uint32_t interval_us = 0, uint8_t instance = 0) :
 		SubscriptionCallback(meta, interval_us, instance)
 	{
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+		int ret = pthread_mutex_init(&_mutex, nullptr);
+
+		if (ret != 0) {
+			abort();
+		}
+
+		ret = pthread_cond_init(&_cv, nullptr);
+
+		if (ret != 0) {
+			abort();
+		}
+#endif
 	}
 
 	virtual ~SubscriptionBlocking()
@@ -138,8 +152,13 @@ public:
 
 private:
 
+#if defined(CONFIG_ARCH_CHIP_SAMV7)
+	pthread_mutex_t _mutex{};
+	pthread_cond_t	_cv{};
+#else
 	pthread_mutex_t _mutex = PTHREAD_MUTEX_INITIALIZER;
 	pthread_cond_t	_cv = PTHREAD_COND_INITIALIZER;
+#endif
 
 };
 
