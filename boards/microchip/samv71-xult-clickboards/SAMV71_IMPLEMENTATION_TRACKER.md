@@ -13,13 +13,23 @@
 |-----------|--------|--------------|
 | Full Boot | ✅ Working | Nov 28, 2025 |
 | MAVLink | ✅ Working | Nov 28, 2025 |
-| Logger | ❌ Disabled (PIO write hang) | Nov 28, 2025 |
+| Logger | ❌ Disabled (SD write hang) | Nov 28, 2025 |
 | Click Board Drivers | ✅ Configured (7 boards) | Nov 28, 2025 |
 | SPI DMA | ✅ Enabled | Nov 28, 2025 |
 | Boot Warnings | ⚠️ Expected (documented) | Nov 28, 2025 |
-| PWM Output | Not implemented | - |
-| Console Buffer | Disabled (static init bug) | Nov 28, 2025 |
-| Flash Progmem | Not fixed (using SD card) | - |
+| PWM/DShot Output | ❌ Not implemented | Nov 28, 2025 |
+| Console Buffer | ❌ Disabled (static init) | Nov 28, 2025 |
+| External QSPI Flash | Not started (SD card works) | Nov 28, 2025 |
+
+### Engineering Task Assignments
+
+| Task Document | Engineer | Priority | Status |
+|---------------|----------|----------|--------|
+| `TASK_LOGGER_DEBUG_ENABLE.md` | TBD | HIGH | Ready |
+| `TASK_CLICK_BOARD_SENSOR_TESTING.md` | TBD | HIGH | Ready |
+| `TASK_HITL_TESTING.md` | TBD | MEDIUM | Ready |
+| `TASK_CONSOLE_BUFFER_DEBUG.md` | TBD | LOW | Ready |
+| `TASK_DSHOT_PWM_IMPLEMENTATION.md` | TBD | HIGH | Ready |
 
 ### Configured Click Board Drivers
 
@@ -566,36 +576,43 @@ private:
 
 ---
 
-## Phase 5: Flash Progmem Dual-Bank Fix
+## Phase 5: External SPI Flash for Parameters
 
 ### Status: NOT STARTED
 
-**File:** `platforms/nuttx/NuttX/nuttx/arch/arm/src/samv7/sam_eefc.c`
+**Note:** Internal flash progmem has dual-bank issues (EEFC0 vs EEFC1). Instead of fixing internal flash, we will use the **external SPI flash** on the SAMV71-XULT board for parameter storage.
 
-**Root Cause:** Driver only supports EEFC0, but parameter partition is in Bank 1 (EEFC1)
+### SAMV71-XULT External Flash
+- **Device:** SST26VF064B (or similar)
+- **Interface:** QSPI (Quad SPI)
+- **Capacity:** 8MB (64 Mbit)
+- **Location:** On-board, directly connected to QSPI pins
 
-**Required Fix:**
-```c
-#define SAMV7_NPAGES_PER_BANK  2048
+### Implementation Options
 
-static inline uintptr_t sam_eefc_base(size_t page)
-{
-#if defined(CONFIG_SAMV7_FLASH_2MB)
-    if (page >= SAMV7_NPAGES_PER_BANK) {
-        return SAM_EEFC1_BASE;  // Bank 1
-    }
-#endif
-    return SAM_EEFC0_BASE;  // Bank 0
-}
-```
+**Option A: QSPI Flash + LittleFS**
+- Use NuttX QSPI driver
+- Mount LittleFS filesystem on QSPI flash
+- Store parameters in `/fs/qspiflash/params`
 
-**Implementation Steps:**
-- [ ] Check if upstream NuttX has fix (Issue #10983)
-- [ ] Cherry-pick or manually apply fix
-- [ ] Test parameter storage on internal flash
-- [ ] Verify dual-bank operation
+**Option B: QSPI Flash + MTD**
+- Use MTD (Memory Technology Device) layer
+- Direct block access for parameter storage
 
-**Current Workaround:** Using SD card for parameter storage (working)
+### Files to Investigate
+- `platforms/nuttx/NuttX/nuttx/arch/arm/src/samv7/sam_qspi.c`
+- `platforms/nuttx/NuttX/nuttx/drivers/mtd/`
+- Board config for QSPI pin definitions
+
+### Implementation Steps
+- [ ] Enable QSPI in defconfig (`CONFIG_SAMV7_QSPI=y`)
+- [ ] Configure QSPI flash chip (SST26 driver)
+- [ ] Mount filesystem on QSPI flash
+- [ ] Update `CONFIG_BOARD_PARAM_FILE` path
+- [ ] Test parameter save/load from QSPI flash
+
+### Current Workaround
+Using SD card for parameter storage (working fine)
 
 **Progress Log:**
 | Date | Action | Result | Notes |
