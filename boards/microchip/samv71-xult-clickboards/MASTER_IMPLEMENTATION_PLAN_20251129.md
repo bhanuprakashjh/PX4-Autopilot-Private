@@ -2,7 +2,7 @@
 
 **Document ID:** MASTER-PLAN-20251129
 **Created:** November 29, 2025
-**Version:** 1.1
+**Version:** 1.2
 **Status:** ACTIVE
 
 ---
@@ -524,6 +524,128 @@ causing a re-entrancy crash.
 
 ---
 
+## 2-Day Coding Sprint (Nov 29-30, 2025)
+
+**Goal:** Complete all code changes without hardware, ready for Monday testing.
+**Constraint:** No sensor hardware available until Monday.
+
+### Task Assignments
+
+| Task | Assignee | Priority | Dependencies | Est. Hours |
+|------|----------|----------|--------------|------------|
+| PWM/io_timer arch implementation | Codex | CRITICAL | None | 8-12 |
+| PWMSim re-entrancy guard | Codex | HIGH | PWM work | 2-3 |
+| Console buffer lazy init | Codex | MEDIUM | None | 2-3 |
+| SD logger write-path fix | Claude | HIGH | None | 6-8 |
+| QSPI parameter storage scaffolding | Claude | MEDIUM | None | 3-4 |
+| ADC pin mapping scaffolding | Claude | LOW | None | 2-3 |
+| Hardware test checklist | Bhanu | - | All above | 1-2 |
+
+### Codex Tasks (PWM Focus)
+
+#### 1. PWM/io_timer Implementation
+**Files to create/modify:**
+- `platforms/nuttx/src/px4/microchip/samv7/io_pins/io_timer.c` - Full implementation
+- `boards/microchip/samv71-xult-clickboards/src/timer_config.cpp` - Pin mapping
+- `platforms/nuttx/src/px4/microchip/samv7/include/px4_arch/io_timer_hw_description.h` - Update if needed
+
+**Deliverables:**
+- [ ] TC1/TC2 timer initialization working
+- [ ] `pwm_out start` succeeds
+- [ ] `pwm info` shows channels
+- [ ] Code compiles with `CONFIG_DRIVERS_PWM_OUT=y`
+
+#### 2. PWMSim Re-entrancy Guard
+**File:** `src/modules/simulation/pwm_out_sim/PWMSim.cpp`
+
+**Deliverables:**
+- [ ] Add deferred subscription update pattern
+- [ ] Remove `#if !defined(CONFIG_ARCH_CHIP_SAMV7)` guard
+- [ ] Verify no crash on work queue switch
+
+#### 3. Console Buffer Lazy Init
+**Files:**
+- `platforms/nuttx/src/px4/common/console_buffer.cpp`
+- `platforms/nuttx/src/px4/common/include/px4_platform/console_buffer.h`
+- `boards/microchip/samv71-xult-clickboards/src/board_config.h`
+
+**Deliverables:**
+- [ ] Lazy init pattern implemented
+- [ ] `BOARD_ENABLE_CONSOLE_BUFFER` enabled
+- [ ] `dmesg` command available
+
+### Claude Tasks (Storage/Debug Focus)
+
+#### 1. SD Logger Write-Path Fix
+**Context:** DMA works for reads only. PIO writes work for small operations but hang under sustained load (logger).
+
+**Files to investigate/modify:**
+- `platforms/nuttx/NuttX/nuttx/arch/arm/src/samv7/sam_hsmci.c`
+- Board defconfig for HSMCI options
+
+**Approach:**
+- Option A: Fix DMA write path (cache coherency - flush before TX DMA)
+- Option B: Fix PIO write hang (identify blocking point under load)
+
+**Deliverables:**
+- [ ] Root cause identified
+- [ ] Fix implemented (either DMA or PIO path)
+- [ ] Stress test script created
+- [ ] Feature flag: `SAMV71_SD_WRITE_FIX`
+
+#### 2. QSPI Parameter Storage Scaffolding
+**Files:**
+- `boards/microchip/samv71-xult-clickboards/nuttx-config/nsh/defconfig` - Enable SST26
+- `boards/microchip/samv71-xult-clickboards/src/init.c` - MTD init
+- `boards/microchip/samv71-xult-clickboards/src/board_config.h` - QSPI defines
+
+**Deliverables:**
+- [ ] SST26 driver enabled in defconfig
+- [ ] QSPI pin configuration added
+- [ ] MTD partition init stub
+- [ ] Kconfig option for param storage location
+- [ ] Default: SD (switch to QSPI after validation)
+
+#### 3. ADC Pin Mapping Scaffolding
+**Files:**
+- `boards/microchip/samv71-xult-clickboards/src/board_config.h` - ADC channel defines
+
+**Deliverables:**
+- [ ] AFEC channels mapped from SAMV71-XULT schematic
+- [ ] `ADC_BATTERY_VOLTAGE_CHANNEL` etc. defined
+- [ ] Driver enable behind Kconfig flag
+
+### Test Gates for Monday
+
+| Test | Command | Pass Criteria |
+|------|---------|---------------|
+| PWM channels | `pwm_out start && pwm info` | Shows 4+ channels |
+| PWM output | Oscilloscope on TIOA/B pins | 50-400Hz, 1000-2000µs |
+| SD write | `logger on` for 10 min | No hang, valid .ulg |
+| Console buffer | `dmesg` | Shows boot log |
+| QSPI mount | `mount` (if enabled) | MTD partition visible |
+
+### Feature Flags (Safety)
+
+All new code paths behind compile-time flags:
+```c
+// boards/microchip/samv71-xult-clickboards/src/board_config.h
+
+// Set to 1 when ready to test PWM output
+#define SAMV71_ENABLE_PWM_OUT           0
+
+// Set to 1 to use QSPI for parameters instead of SD
+#define SAMV71_USE_QSPI_PARAMS          0
+
+// Set to 1 to enable SD write fix (DMA or improved PIO)
+#define SAMV71_SD_WRITE_FIX_ENABLED     0
+
+// Set to 1 to enable ADC battery monitoring
+#define SAMV71_ENABLE_ADC_BATTERY       0
+```
+
+---
+
 ## Appendix B: Weekly Milestone Targets
 
 ### Week 1
@@ -559,6 +681,7 @@ causing a re-entrancy crash.
 |---------|------|--------|---------|
 | 1.0 | 2025-11-29 | Claude | Initial master plan |
 | 1.1 | 2025-11-29 | Claude | Corrections: Timer resource reality (TC1/TC2, MAX_IO_TIMERS=3); BlockingList already fixed; PWMSim issue is re-entrancy not mutex; HITL can run parallel with sensors |
+| 1.2 | 2025-11-29 | Team | Added 2-day coding sprint (Nov 29-30): Codex=PWM/io_timer, Claude=SD/QSPI/ADC, Bhanu=test checklist; Feature flags for safety |
 
 ---
 
