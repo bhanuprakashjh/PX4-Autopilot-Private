@@ -4,6 +4,7 @@
 **Created:** November 28, 2025
 **Status:** ACTIVE - In Progress
 **Related:** `SAMV71_MASTER_PORTING_GUIDE.md`
+**Master Plan:** `MASTER_IMPLEMENTATION_PLAN_20251129.md` - Comprehensive roadmap with phases and assignments
 
 ---
 
