@@ -2,7 +2,7 @@
 
 **Document ID:** MASTER-PLAN-20251129
 **Created:** November 29, 2025
-**Version:** 1.0
+**Version:** 1.1
 **Status:** ACTIVE
 
 ---
@@ -22,11 +22,20 @@ This master plan synthesizes the comprehensive gap analysis from `FMU6X_SAMV71_D
 
 ### Critical Path to Flight
 ```
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│ PWM/io_timer │───►│   Sensors    │───►│  HITL Test   │───►│ Real Flight  │
-│  (BLOCKING)  │    │  Validated   │    │   Passed     │    │   Ready      │
-└──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
+                              ┌──────────────┐
+                         ┌───►│  HITL Test   │───┐
+                         │    │  (Simulated) │   │
+┌──────────────┐    ┌────┴───────┐           │   │    ┌──────────────┐
+│   Sensors    │───►│  Parallel  │           │   ├───►│ Real Flight  │
+│  Validated   │    │   Tracks   │           │   │    │   Ready      │
+└──────────────┘    └────┬───────┘           │   │    └──────────────┘
+                         │    ┌──────────────┐   │
+                         └───►│ PWM/io_timer │───┘
+                              │ (For motors) │
+                              └──────────────┘
 ```
+**Note:** HITL testing can proceed in parallel with PWM development once sensors are validated.
+PWM is only required for real motor output, not for HITL simulation.
 
 ---
 
@@ -105,10 +114,22 @@ The detailed comparison identified these priority gaps:
 5. [ ] Optional: DShot600 implementation
 
 **Technical Requirements:**
-- Use SAMV71 Timer Counter (TC1, TC2, TC3)
-- TC0-CH0 reserved for HRT
+- Use SAMV71 Timer Counter TC1 and TC2 (current arch layer has `MAX_IO_TIMERS=3`)
+- TC0-CH0 reserved for HRT (high-resolution timer)
+- Each TC channel has TIOA/TIOB outputs = 4 channels from TC1+TC2
+- To get more channels: either extend arch layer for TC3, or use PWM peripheral
 - Target frequency: 50-400 Hz PWM, DShot600 optional
-- DMA support investigation for DShot
+- DMA support investigation for DShot (TC may not have direct DMA; PWM peripheral does)
+
+**Timer Resource Reality:**
+| Timer | Channels | Available | PWM Outputs |
+|-------|----------|-----------|-------------|
+| TC0 | CH0,CH1,CH2 | CH1,CH2 only | 4 (TIOA/B x2) - CH0=HRT |
+| TC1 | CH0,CH1,CH2 | All | 6 (TIOA/B x3) |
+| TC2 | CH0,CH1,CH2 | All | 6 (TIOA/B x3) |
+| **Total** | | | **16 possible, 6 with current MAX_IO_TIMERS=3** |
+
+**Decision Required:** Either work within TC1/TC2 (6 channels) or extend arch layer for more.
 
 #### Track 1B: Sensor Validation
 **Assignee:** Engineer 2
@@ -256,26 +277,40 @@ The detailed comparison identified these priority gaps:
 4. [ ] Boot log captured and viewable
 5. [ ] Thread-safe operation verified
 
-#### Task 3B: BlockingList Static Init Fix (NEW TASK NEEDED)
+#### Task 3B: PWMSim Re-entrancy Fix (LOW PRIORITY)
 **Assignee:** TBD
-**Task Doc:** `TASK_BLOCKINGLIST_FIX.md` (to be created)
+**Task Doc:** N/A (already documented in code)
 **Dependencies:** None
-**Effort:** 1 day
+**Effort:** 1-2 days
 
-**Scope:**
-- Review existing workaround in `BlockingList.hpp`
-- Implement proper lazy initialization
-- Remove `#ifdef CONFIG_ARCH_CHIP_SAMV7` guards
-- Submit upstream PR to PX4
+**Status:** WORKAROUND IN PLACE - NOT BLOCKING
 
-**Current Workaround (to be improved):**
+**Background:**
+The `BlockingList.hpp` static init issue is **ALREADY FIXED** with proper constructor
+initialization using `pthread_mutex_init()`. The remaining SAMV7 guard in `pwm_out_sim`
+is a **different issue** - a work queue re-entrancy race condition.
+
+**Current Workaround (in PWMSim.cpp line 618-624):**
 ```cpp
-#ifdef CONFIG_ARCH_CHIP_SAMV7
-    pthread_mutex_t _mutex = PTHREAD_MUTEX_INITIALIZER;
-#else
-    pthread_mutex_t _mutex;
+// SAMV7: Skip updateSubscriptions due to work queue switch re-entrancy issue.
+// ScheduleNow() immediately triggers Run() on rate_ctrl before the first
+// updateSubscriptions() completes, causing a race condition / crash.
+// This is NOT a mutex init issue - the mutex fixes are working.
+#if !defined(CONFIG_ARCH_CHIP_SAMV7)
+    _mixing_output.updateSubscriptions(true);
 #endif
 ```
+
+**Root Cause:** When `MixingOutput::updateSubscriptions()` calls `ScheduleNow()`, it
+immediately triggers `Run()` on rate_ctrl work queue before the first call completes,
+causing a re-entrancy crash.
+
+**Potential Fix (Future):**
+- Investigate NuttX work queue scheduling behavior on SAMV7
+- Add re-entrancy guard in updateSubscriptions()
+- Or defer subscription updates to next cycle
+
+**Impact:** Minimal - pwm_out_sim works for HITL with current workaround.
 
 #### Task 3C: Safety Features
 **Assignee:** TBD
@@ -314,8 +349,10 @@ The detailed comparison identified these priority gaps:
 | Engineer 1 | Logger/SD Debug | QSPI Storage | 1C, 2C |
 | Engineer 2 | Click Board Sensors | ADC Battery | 1B, 2B |
 | Engineer 3 | HITL Testing | Safety Features | 2A, 3C |
-| Engineer 4 | Console Buffer | BlockingList | 3A, 3B |
+| Engineer 4 | Console Buffer | - | 3A |
 | Engineer 5 | PWM/DShot (CRITICAL) | - | 1A |
+
+**Note:** BlockingList static init is already fixed. PWMSim re-entrancy has workaround in place.
 
 ### Hardware Requirements
 
@@ -441,7 +478,8 @@ The detailed comparison identified these priority gaps:
 |----------|-------|----------|
 | `TASK_ADC_BATTERY_MONITOR.md` | ADC configuration, battery monitoring | HIGH |
 | `TASK_QSPI_FLASH_STORAGE.md` | SST26 flash, parameter storage | MEDIUM |
-| `TASK_BLOCKINGLIST_FIX.md` | Static init fix, upstream PR | LOW |
+
+**Note:** `TASK_BLOCKINGLIST_FIX.md` not needed - issue already fixed in `BlockingList.hpp`.
 
 ### Reference Documents
 | Document | Purpose |
@@ -520,6 +558,7 @@ The detailed comparison identified these priority gaps:
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2025-11-29 | Claude | Initial master plan |
+| 1.1 | 2025-11-29 | Claude | Corrections: Timer resource reality (TC1/TC2, MAX_IO_TIMERS=3); BlockingList already fixed; PWMSim issue is re-entrancy not mutex; HITL can run parallel with sensors |
 
 ---
 
